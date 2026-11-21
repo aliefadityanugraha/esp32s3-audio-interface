@@ -1,0 +1,1844 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>ESP32-S3 DLMS 2×4 — Audio Control Console</title>
+<style>
+:root{
+  --bg:#090d16;--bg2:#101726;--card:#151f33;--card2:#1b2842;--border:#263759;
+  --accent:#38e8ff;--accent2:#ffb830;--danger:#ff3b57;--ok:#24e07c;--purple:#b36bff;
+  --text:#edf4ff;--dim:#8ba0c4;--radius:10px;--font:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;min-height:100vh;overflow-x:hidden}
+button,input,select{font-family:inherit;color:var(--text)}
+button{cursor:pointer;border:1px solid var(--border);background:var(--card2);border-radius:8px;padding:8px 12px;font-weight:600;transition:.15s}
+button:hover{border-color:var(--accent);filter:brightness(1.1)}
+button:active{transform:scale(.97)}
+button.primary{background:linear-gradient(135deg,#0891b2,#2563eb);border:none;color:#fff}
+button.accent{background:var(--accent);color:#06121f;border:none}
+button.danger{background:var(--danger);color:#fff;border:none}
+button.warn{background:var(--accent2);color:#140e00;border:none}
+button.ok{background:var(--ok);color:#041a0d;border:none}
+button.on{background:var(--accent);color:#06121f;border-color:var(--accent)}
+button.muted{background:var(--danger);color:#fff;border-color:var(--danger)}
+button.sm{padding:5px 9px;font-size:12px}
+input[type=text],input[type=number],select{background:#0c1322;border:1px solid var(--border);border-radius:7px;padding:7px 9px;color:var(--text)}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:6px;background:#0c1424;border-radius:4px;outline:none;border:1px solid #223352}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;border-radius:50%;background:var(--accent);border:2px solid #fff;cursor:pointer;box-shadow:0 0 8px rgba(56,232,255,.55)}
+
+/* Splash Connect Overlay */
+#connectOverlay{position:fixed;inset:0;z-index:900;background:radial-gradient(circle at top,#13223e,#070a12 75%);display:flex;align-items:center;justify-content:center;padding:18px}
+#connectOverlay.hidden{display:none}
+.splash-box{width:100%;max-width:440px;background:rgba(21,31,51,.94);border:1px solid var(--border);border-radius:16px;padding:24px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+.splash-logo{font-size:22px;font-weight:800;letter-spacing:.5px;background:linear-gradient(90deg,var(--accent),#60a5fa,var(--accent2));-webkit-background-clip:text;color:transparent;margin-bottom:4px}
+.splash-sub{color:var(--dim);font-size:12px;margin-bottom:20px}
+.splash-btns{display:flex;flex-direction:column;gap:10px}
+.splash-btns button{padding:12px 16px;font-size:14px;border-radius:10px}
+.splash-note{margin-top:14px;font-size:11px;color:var(--dim);line-height:1.5}
+
+/* Top Bar */
+header{position:sticky;top:0;z-index:100;background:rgba(11,17,30,.95);backdrop-filter:blur(8px);border-bottom:1px solid var(--border);padding:8px 12px;display:flex;flex-wrap:wrap;align-items:center;gap:8px;justify-content:space-between}
+.brand{display:flex;align-items:center;gap:8px;font-weight:800;font-size:15px}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--dim);box-shadow:0 0 8px currentColor}
+.dot.ble{background:#38bdf8;color:#38bdf8}
+.dot.ws{background:var(--ok);color:var(--ok)}
+.dot.off{background:var(--accent2);color:var(--accent2)}
+.hdr-badges{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12px}
+.badge{background:var(--card);border:1px solid var(--border);border-radius:6px;padding:4px 8px;display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+.badge.hot{border-color:var(--danger);color:#ff8a9a;background:rgba(255,59,87,.16)}
+
+/* 12-Tab Nav */
+nav#tabBar{display:flex;overflow-x:auto;gap:4px;padding:6px 10px;background:var(--bg2);border-bottom:1px solid var(--border);scrollbar-width:none}
+nav#tabBar::-webkit-scrollbar{display:none}
+.tab-btn{flex:0 0 auto;padding:7px 12px;font-size:12px;border-radius:7px;background:var(--card);border:1px solid transparent;color:var(--dim)}
+.tab-btn.active{background:var(--accent);color:#041320;font-weight:800;box-shadow:0 0 12px rgba(56,232,255,.35)}
+
+/* Main Container */
+main{max-width:1280px;margin:0 auto;padding:12px;padding-bottom:48px}
+.tab-pane{display:none;animation:fade .18s ease}
+.tab-pane.active{display:block}
+@keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+.grid{display:grid;gap:12px}
+.g2{grid-template-columns:repeat(auto-fit,minmax(290px,1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.g4{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:12px}
+.card h3{margin:0 0 10px 0;font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--accent);display:flex;align-items:center;justify-content:space-between;gap:8px}
+.row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.between{justify-content:space-between}
+.ctrl{margin-bottom:10px}
+.ctrl-lbl{display:flex;justify-content:space-between;font-size:12px;color:var(--dim);margin-bottom:4px}
+.ctrl-lbl b{color:var(--text);font-variant-numeric:tabular-nums}
+.ch-pills{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px}
+.ch-pill{padding:6px 11px;font-size:12px;border-radius:7px;background:var(--bg2);color:var(--dim);border:1px solid var(--border)}
+.ch-pill.active{background:var(--accent);color:#04121f;border-color:var(--accent);font-weight:800}
+
+/* Canvas Wrapper */
+.canvas-wrap{position:relative;width:100%;background:#070c17;border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:10px}
+canvas{display:block;width:100%;touch-action:none}
+.canvas-hint{position:absolute;bottom:6px;right:8px;font-size:10px;color:rgba(160,185,220,.7);pointer-events:none}
+
+/* Matrix Table */
+.matrix-tbl{width:100%;border-collapse:collapse;font-size:12px}
+.matrix-tbl th,.matrix-tbl td{padding:6px;text-align:center;border:1px solid var(--border)}
+.matrix-tbl th{background:var(--bg2);color:var(--accent)}
+.mx-btn{width:100%;padding:7px 4px;font-size:12px;border-radius:6px}
+.mx-btn.m50{background:#854d0e;color:#fef08a;border-color:#ca8a04}
+.mx-btn.m100{background:#065f46;color:#a7f3d0;border-color:var(--ok)}
+
+/* PEQ Band Strip */
+.band-strip{display:grid;grid-template-columns:repeat(9,minmax(36px,1fr));gap:4px;margin-bottom:10px}
+.band-btn{padding:6px 2px;font-size:11px;text-align:center;border-radius:6px;background:var(--bg2);border:1px solid var(--border);color:var(--dim)}
+.band-btn.active{background:var(--accent);color:#06121f;font-weight:800}
+.band-btn.boost{border-bottom:3px solid var(--ok)}
+.band-btn.cut{border-bottom:3px solid var(--danger)}
+
+/* Preset List */
+.preset-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;margin-bottom:6px;flex-wrap:wrap}
+
+/* Console Log */
+#cmdLog{background:#060a12;border:1px solid var(--border);border-radius:7px;padding:8px;height:130px;overflow-y:auto;font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#93c5fd;white-space:pre-wrap}
+#toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--accent);color:#04121e;font-weight:800;padding:9px 18px;border-radius:99px;z-index:999;opacity:0;pointer-events:none;transition:.25s;box-shadow:0 8px 25px rgba(0,0,0,.5)}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(-4px)}
+progress{width:100%;height:10px;border-radius:5px;overflow:hidden}
+</style>
+</head>
+<body>
+
+<!-- ==================== CONNECT / OFFLINE OVERLAY ==================== -->
+<div id="connectOverlay">
+  <div class="splash-box">
+    <div class="splash-logo">ESP32-S3 DLMS 2×4</div>
+    <div class="splash-sub">Hybrid USB Audio Interface (UAC2 48kHz) + Digital Loudspeaker Management</div>
+    <div class="splash-btns">
+      <button class="primary" id="btnSplashWs" style="display:none" onclick="connectWS()">Terhubung via WiFi AU-WEB (WebSocket)</button>
+      <button class="accent" onclick="connectBLE()">Scan &amp; Connect (BLE NUS)</button>
+      <button onclick="enterOfflineMode()">Masuk Tanpa Alat (Mode Offline)</button>
+    </div>
+    <div class="splash-note" id="splashStatus">
+      Mendukung Web Bluetooth (Nordic UART UUID) &amp; WiFi AP <b>AU-WEB</b> (<code>ws://192.168.4.1:81</code>).<br>
+      Mode Offline menyediakan simulasi sinyal, kurva Xover/PEQ/Comp, &amp; konverter logo RGB565.
+    </div>
+  </div>
+</div>
+
+<!-- ==================== HEADER ==================== -->
+<header>
+  <div class="brand">
+    <span class="dot" id="connDot"></span>
+    <span>DLMS 2×4</span>
+    <span class="badge" id="connLabel">OFFLINE</span>
+  </div>
+  <div class="hdr-badges">
+    <span class="badge" id="hdrTemp">Temp: --.-°C</span>
+    <span class="badge" id="hdrCpu">DSP: --%</span>
+    <span class="badge" id="hdrLink">LINK: OFF</span>
+    <button class="sm" id="btnHdrMute" onclick="toggleMasterMute()">MUTE</button>
+    <button class="sm primary" id="btnReconnect" onclick="openConnectModal()">Koneksi</button>
+  </div>
+</header>
+
+<!-- ==================== 12 NAVIGATION TABS ==================== -->
+<nav id="tabBar">
+  <button class="tab-btn active" data-tab="home">Home</button>
+  <button class="tab-btn" data-tab="input">Input</button>
+  <button class="tab-btn" data-tab="output">Output</button>
+  <button class="tab-btn" data-tab="xover">Crossover</button>
+  <button class="tab-btn" data-tab="peq">PEQ</button>
+  <button class="tab-btn" data-tab="comp">Comp/Lim</button>
+  <button class="tab-btn" data-tab="gate">Noise Gate</button>
+  <button class="tab-btn" data-tab="delay">Delay</button>
+  <button class="tab-btn" data-tab="gen">Noise/Generator</button>
+  <button class="tab-btn" data-tab="presets">Presets</button>
+  <button class="tab-btn" data-tab="rta">RTA</button>
+  <button class="tab-btn" data-tab="setup">Setup</button>
+</nav>
+
+<main>
+<!-- ==================== 1. HOME ==================== -->
+<section class="tab-pane active" id="tab-home">
+  <div class="grid g2">
+    <div class="card">
+      <h3>Live VU Meter 6-Kanal <span style="font-size:11px;color:var(--dim)">Peak-Hold • Clip • Limiter • GR</span></h3>
+      <div class="canvas-wrap"><canvas id="cvVu" height="250"></canvas></div>
+      <div class="row between" id="homeMuteRow"></div>
+    </div>
+    <div class="card">
+      <h3>Master Control &amp; Quick Overview</h3>
+      <div class="ctrl">
+        <div class="ctrl-lbl"><span>Master Volume</span><b id="lblMasterVol">0.0 dB</b></div>
+        <input type="range" id="slMasterVol" min="-60" max="0" step="0.5" value="0" oninput="onMasterVol(this.value)">
+      </div>
+      <div class="row" style="margin-bottom:12px">
+        <button id="btnMasterMute" onclick="toggleMasterMute()" style="flex:1">Master Mute: OFF</button>
+        <button id="btnHomeLock" onclick="togglePanelLock()" style="flex:1">Panel Lock: OFF</button>
+        <button onclick="sendCmd('DUMP')" style="flex:1">Sync DUMP</button>
+      </div>
+      <h3>Stereo Channel Link</h3>
+      <div class="row" style="margin-bottom:12px" id="homeLinkBtns">
+        <button class="sm" data-link="1" onclick="toggleLinkBit(1)">Link IN 1-2</button>
+        <button class="sm" data-link="2" onclick="toggleLinkBit(2)">Link OUT 1-2</button>
+        <button class="sm" data-link="4" onclick="toggleLinkBit(4)">Link OUT 3-4</button>
+      </div>
+      <h3>Status Cepat</h3>
+      <div class="grid g2" style="gap:6px;font-size:12px">
+        <div class="badge between"><span>Preset Aktif</span><b id="stPreset">Default</b></div>
+        <div class="badge between"><span>USB UAC2</span><b id="stUsb">WAIT</b></div>
+        <div class="badge between"><span>Generator</span><b id="stGen">OFF</b></div>
+        <div class="badge between"><span>Tema TFT</span><b id="stTheme">ICE LUXURY</b></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== 2. INPUT ==================== -->
+<section class="tab-pane" id="tab-input">
+  <div class="ch-pills" id="inPills"></div>
+  <div class="grid g2">
+    <div class="card">
+      <h3>Pengaturan Input Stage (<span id="inTitle">IN A</span>)</h3>
+      <div class="ctrl">
+        <div class="ctrl-lbl"><span>Input Gain</span><b id="lblInGain">0.0 dB</b></div>
+        <input type="range" id="slInGain" min="-12" max="12" step="0.5" value="0" oninput="setInParam('GAIN',this.value)">
+      </div>
+      <div class="row" style="margin-bottom:12px">
+        <button id="btnInMute" onclick="toggleInBool('m','MUTE')">Mute: OFF</button>
+        <button id="btnInPhase" onclick="toggleInBool('ph','PHASE')">Phase: 0°</button>
+        <button onclick="copyInChannel()">Copy ke IN Lain</button>
+      </div>
+      <div class="ctrl">
+        <div class="ctrl-lbl"><span>USB Audio Record Tap (ESP32 → PC)</span><b id="lblUsbTap">POST INPUT DSP</b></div>
+        <div class="row">
+          <button id="btnTapPost" class="sm" onclick="setUsbRecPost(1)">Post-DSP (Gate/PEQ/Comp)</button>
+          <button id="btnTapRaw" class="sm" onclick="setUsbRecPost(0)">Raw ADC Direct</button>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Ringkasan Pemrosesan Input</h3>
+      <div id="inSummary" style="font-size:13px;line-height:1.9;color:var(--dim)"></div>
+      <div class="row" style="margin-top:10px">
+        <button class="sm primary" onclick="jumpToTab('peq',curIn)">Buka 9-Band PEQ</button>
+        <button class="sm primary" onclick="jumpToTab('comp',curIn)">Buka Compressor</button>
+        <button class="sm primary" onclick="jumpToTab('gate',curIn)">Buka Noise Gate</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== 3. OUTPUT & ROUTING MATRIX ==================== -->
+<section class="tab-pane" id="tab-output">
+  <div class="ch-pills" id="outPills"></div>
+  <div class="grid g2">
+    <div class="card">
+      <h3>Pengaturan Output Stage (<span id="outTitle">OUT 1</span>)</h3>
+      <div class="ctrl">
+        <div class="ctrl-lbl"><span>Output Gain</span><b id="lblOutGain">0.0 dB</b></div>
+        <input type="range" id="slOutGain" min="-12" max="12" step="0.5" value="0" oninput="setOutParam('GAIN',this.value)">
+      </div>
+      <div class="row" style="margin-bottom:10px">
+        <button id="btnOutMute" onclick="toggleOutBool('m','MUTE')">Mute: OFF</button>
+        <button id="btnOutPhase" onclick="toggleOutBool('ph','PHASE')">Phase: 0°</button>
+        <button id="btnOutBypass" onclick="toggleOutBool('byp','BYPASS')">DSP Bypass: OFF</button>
+      </div>
+      <div class="row">
+        <button id="btnOutClip" class="sm" onclick="toggleOutClip()">Anti-Clip: SOFT TANH</button>
+        <button class="sm warn" onclick="copyOutToAll()">Copy Setting → Semua OUT 1-4</button>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Routing Matrix 4×4 (Klik untuk ubah 0% / 50% / 100%)</h3>
+      <table class="matrix-tbl" id="matrixTable"></table>
+      <div class="row" style="margin-top:8px">
+        <button class="sm" onclick="resetDefaultMatrix()">Default Hybrid (OUT1-2: IN+USB, OUT3-4: Direct IN)</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== 4. CROSSOVER ==================== -->
+<section class="tab-pane" id="tab-xover">
+  <div class="row between" style="margin-bottom:8px">
+    <div class="ch-pills" id="xoPills" style="margin:0"></div>
+    <button class="sm" id="btnXoOverlay" onclick="toggleXoOverlay()">Overlay Semua 4 OUT: OFF</button>
+  </div>
+  <div class="card">
+    <h3>Kurva Respon Gabungan Crossover + PEQ <span style="font-size:11px;color:var(--dim)">Drag titik HPF / LPF langsung di grafik</span></h3>
+    <div class="canvas-wrap">
+      <canvas id="cvXover" height="230"></canvas>
+      <div class="canvas-hint">20 Hz — 20 kHz (Log) • Drag Handle HPF/LPF</div>
+    </div>
+    <div class="grid g2">
+      <div class="card" style="background:var(--bg2)">
+        <h3>High-Pass Filter (HPF) <button class="sm" id="btnHpfEn" onclick="toggleXo('hpf')">OFF</button></h3>
+        <div class="row" style="margin-bottom:8px">
+          <select id="selHpfType" onchange="setXo('hpf','TYPE',this.value)" style="flex:1">
+            <option value="0">Linkwitz-Riley</option><option value="1">Butterworth</option><option value="2">Bessel</option>
+          </select>
+          <select id="selHpfSlope" onchange="setXo('hpf','SLOPE',this.value)" style="flex:1">
+            <option value="12">12 dB/oct</option><option value="24">24 dB/oct</option><option value="48">48 dB/oct</option>
+          </select>
+        </div>
+        <div class="ctrl">
+          <div class="ctrl-lbl"><span>Frekuensi HPF</span><b id="lblHpfFreq">80.0 Hz</b></div>
+          <input type="range" id="slHpfFreq" min="0" max="1000" step="1" oninput="setXoLogFreq('hpf',this.value)">
+        </div>
+      </div>
+      <div class="card" style="background:var(--bg2)">
+        <h3>Low-Pass Filter (LPF) <button class="sm" id="btnLpfEn" onclick="toggleXo('lpf')">OFF</button></h3>
+        <div class="row" style="margin-bottom:8px">
+          <select id="selLpfType" onchange="setXo('lpf','TYPE',this.value)" style="flex:1">
+            <option value="0">Linkwitz-Riley</option><option value="1">Butterworth</option><option value="2">Bessel</option>
+          </select>
+          <select id="selLpfSlope" onchange="setXo('lpf','SLOPE',this.value)" style="flex:1">
+            <option value="12">12 dB/oct</option><option value="24">24 dB/oct</option><option value="48">48 dB/oct</option>
+          </select>
+        </div>
+        <div class="ctrl">
+          <div class="ctrl-lbl"><span>Frekuensi LPF</span><b id="lblLpfFreq">18000.0 Hz</b></div>
+          <input type="range" id="slLpfFreq" min="0" max="1000" step="1" oninput="setXoLogFreq('lpf',this.value)">
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== 5. PEQ (9-BAND INTERACTIVE) ==================== -->
+<section class="tab-pane" id="tab-peq">
+  <div class="row between" style="margin-bottom:8px">
+    <div class="ch-pills" id="peqPills" style="margin:0"></div>
+    <div class="row">
+      <button class="sm" id="btnPeqRtaBg" onclick="togglePeqRtaBg()">RTA Latar: ON</button>
+      <button class="sm danger" onclick="flatCurrentPeq()">Flat 9-Band</button>
+    </div>
+  </div>
+  <div class="card">
+    <h3>9-Band Parametric EQ + Xover Live Curve <span id="peqChBadge" style="color:var(--accent2)">OUT 1</span></h3>
+    <div class="canvas-wrap">
+      <canvas id="cvPeq" height="250"></canvas>
+      <div class="canvas-hint">Drag titik B1–B9 (Freq/Gain) • Scroll Wheel = Q</div>
+    </div>
+    <div class="band-strip" id="peqBandStrip"></div>
+    <div class="grid g4">
+      <div class="ctrl">
+        <div class="ctrl-lbl"><span>Band Aktif &amp; Tipe</span><b id="lblPeqBand">B1</b></div>
+        <div class="row">
+          <button class="sm" id="btnPeqEn" onclick="togglePeqEn()">ON</button>
+          <select id="selPeqType" onchange="setPeqField('TYPE',this.value)" style="flex:1">
+            <option value="0">Peaking</option><option value="1">Low Shelf</option><option value="2">High Shelf</option>
+            <option value="3">Low Pass</option><option value="4">High Pass</option><option value="5">Notch</option><option value="6">All Pass</option>
+          </select>
+        </div>
+      </div>
+      <div class="ctrl">
+        <div class="ctrl-lbl"><span>Frekuensi (0.5 Hz res)</span><b id="lblPeqFreq">40.0 Hz</b></div>
+        <input type="range" id="slPeqFreq" min="0" max="1000" step="1" oninput="setPeqLogFreq(this.value)">
+      </div>
+      <div class="ctrl">
+        <div class="ctrl-lbl"><span>Gain (±15 dB)</span><b id="lblPeqGain">0.0 dB</b></div>
+        <input type="range" id="slPeqGain" min="-15" max="15" step="0.5" value="0" oninput="setPeqField('GAIN',this.value)">
+      </div>
+      <div class="ctrl">
+        <div class="ctrl-lbl"><span>Q Factor (0.4–12.0)</span><b id="lblPeqQ">1.4</b></div>
+        <input type="range" id="slPeqQ" min="0.4" max="12" step="0.1" value="1.4" oninput="setPeqField('Q',this.value)">
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== 6. COMP / LIMITER ==================== -->
+<section class="tab-pane" id="tab-comp">
+  <div class="ch-pills" id="compPills"></div>
+  <div class="grid g2">
+    <div class="card">
+      <h3>Kurva Transfer &amp; Gain Reduction (GR) <span id="compModeLbl" style="color:var(--accent2)">COMPRESSOR</span></h3>
+      <div class="canvas-wrap"><canvas id="cvComp" height="250"></canvas></div>
+    </div>
+    <div class="card" id="compControlsCard">
+      <h3>Parameter Dynamics <button class="sm" id="btnDynEn" onclick="toggleDynEn()">OFF</button></h3>
+      <div id="compSliders"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== 7. NOISE GATE ==================== -->
+<section class="tab-pane" id="tab-gate">
+  <div class="ch-pills" id="gatePills"></div>
+  <div class="grid g2">
+    <div class="card">
+      <h3>Kurva Transfer Noise Gate <span id="gateStatusBadge" class="badge">OPEN</span></h3>
+      <div class="canvas-wrap"><canvas id="cvGate" height="240"></canvas></div>
+    </div>
+    <div class="card">
+      <h3>Parameter Noise Gate (<span id="gateChLbl">OUT 1</span>) <button class="sm" id="btnGateEn" onclick="toggleGateEn()">ON</button></h3>
+      <div class="ctrl"><div class="ctrl-lbl"><span>Threshold</span><b id="lblGateThr">-50.0 dB</b></div>
+        <input type="range" id="slGateThr" min="-90" max="0" step="1" oninput="setGateParam('THR',this.value)"></div>
+      <div class="ctrl"><div class="ctrl-lbl"><span>Attack</span><b id="lblGateAtk">2.0 ms</b></div>
+        <input type="range" id="slGateAtk" min="0.1" max="100" step="0.5" oninput="setGateParam('ATK',this.value)"></div>
+      <div class="ctrl"><div class="ctrl-lbl"><span>Release</span><b id="lblGateRel">150 ms</b></div>
+        <input type="range" id="slGateRel" min="10" max="2000" step="10" oninput="setGateParam('REL',this.value)"></div>
+      <div style="font-size:12px;color:var(--dim);margin-top:8px">Default Output Auto-Gate: <b>-50 dB</b> untuk menjaga lantai noise hening saat tidak ada sinyal.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== 8. DELAY (PSRAM 300ms) ==================== -->
+<section class="tab-pane" id="tab-delay">
+  <div class="card">
+    <h3>Time Alignment Delay Line (PSRAM hingga 300 ms / 102.9 meter per Output)</h3>
+    <div class="grid g2" id="delayGrid"></div>
+  </div>
+</section>
+
+<!-- ==================== 9. NOISE / GENERATOR ==================== -->
+<section class="tab-pane" id="tab-gen">
+  <div class="grid g2">
+    <div class="card">
+      <h3>Internal Signal Generator (Auto-Off 30 Detik)</h3>
+      <div class="row" style="margin-bottom:12px">
+        <button id="btnGenOff" onclick="setGenType(0)" style="flex:1">OFF</button>
+        <button id="btnGenWhite" onclick="setGenType(1)" style="flex:1">WHITE NOISE</button>
+        <button id="btnGenPink" onclick="setGenType(2)" style="flex:1">PINK NOISE</button>
+      </div>
+      <div class="ctrl">
+        <div class="ctrl-lbl"><span>Level Output Generator</span><b id="lblGenLvl">-20.0 dBFS</b></div>
+        <input type="range" id="slGenLvl" min="-60" max="-6" step="1" value="-20" oninput="setGenParam('LEVEL',this.value)">
+      </div>
+      <div class="ctrl">
+        <div class="ctrl-lbl"><span>Timer Auto-Off</span><b id="lblGenTime">30 detik</b></div>
+        <input type="range" id="slGenTime" min="5" max="120" step="5" value="30" oninput="setGenParam('TIME',this.value)">
+      </div>
+      <div class="ctrl">
+        <div class="ctrl-lbl"><span>Tujuan Output (Destination Mask)</span><b id="lblGenMask">OUT 1-4</b></div>
+        <div class="row" id="genDestBtns"></div>
+      </div>
+      <button class="danger" style="width:100%;padding:12px;margin-top:8px" onclick="setGenType(0)">MATIKAN GENERATOR SEKARANG</button>
+    </div>
+    <div class="card">
+      <h3>Catatan Kalibrasi</h3>
+      <p style="color:var(--dim);font-size:13px;line-height:1.6">
+        <b>Pink Noise</b> memiliki energi merata per oktaf (-3 dB/oct), ideal untuk menyetel Crossover &amp; PEQ sambil memantau tab <b>RTA</b>.<br><br>
+        Demi keamanan driver speaker/tweeter, generator otomatis padam (fade-out halus) setelah timer selesai (default <b>30 detik</b>).
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== 10. PRESETS ==================== -->
+<section class="tab-pane" id="tab-presets">
+  <div class="grid g2">
+    <div class="card">
+      <h3>Preset Slots LittleFS (Slot 1 – 8)</h3>
+      <div id="presetList"></div>
+    </div>
+    <div class="card">
+      <h3>Backup / Restore File JSON Lokal</h3>
+      <p style="font-size:12px;color:var(--dim)">Simpan seluruh kurva DLMS ke perangkat HP/PC atau impor ulang untuk disinkronkan ke ESP32-S3.</p>
+      <div class="row" style="margin-bottom:12px">
+        <button class="primary" onclick="exportJsonPreset()">Export Konfigurasi (.json)</button>
+        <label style="display:inline-block"><button type="button" onclick="document.getElementById('impFile').click()">Import (.json)</button>
+          <input type="file" id="impFile" accept=".json" style="display:none" onchange="importJsonPreset(this.files[0])"></label>
+      </div>
+      <button class="danger sm" onclick="factoryResetLocal()">Reset Default Pabrik</button>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== 11. RTA 32-BAND ==================== -->
+<section class="tab-pane" id="tab-rta">
+  <div class="card">
+    <h3>Real-Time Analyzer (32-Band ISO 20 Hz – 20 kHz)
+      <div class="row">
+        <select id="selRtaSrc" onchange="setRtaSrc(this.value)" style="font-size:12px;padding:4px 6px">
+          <option value="0">IN A</option><option value="1">IN B</option>
+          <option value="2">OUT 1</option><option value="3">OUT 2</option>
+          <option value="4">OUT 3</option><option value="5">OUT 4</option>
+          <option value="6">IN MIX</option><option value="7" selected>OUT 1-2 MIX</option>
+        </select>
+        <select id="selRtaFft" onchange="setRtaFft(this.value)" style="font-size:12px;padding:4px 6px">
+          <option value="256">256 pt</option><option value="512" selected>512 pt</option>
+        </select>
+        <button class="sm" id="btnRtaHold" onclick="toggleRtaPause()">Pause</button>
+        <button class="sm" onclick="rtaPeaks.fill(-96)">Reset Peak</button>
+      </div>
+    </h3>
+    <div class="canvas-wrap"><canvas id="cvRta" height="300"></canvas></div>
+  </div>
+</section>
+
+<!-- ==================== 12. SETUP & UTILITIES ==================== -->
+<section class="tab-pane" id="tab-setup">
+  <div class="grid g2">
+    <!-- Master, Link, Copy, Lock -->
+    <div class="card">
+      <h3>Kontrol Sistem &amp; Utilitas Kanal</h3>
+      <div class="ctrl">
+        <div class="ctrl-lbl"><span>Master Volume</span><b id="lblSetupMaster">0.0 dB</b></div>
+        <input type="range" id="slSetupMaster" min="-60" max="0" step="0.5" value="0" oninput="onMasterVol(this.value)">
+      </div>
+      <div class="ctrl">
+        <div class="ctrl-lbl"><span>Stereo Channel Link</span><b id="lblSetupLink">NONE</b></div>
+        <div class="row" id="setupLinkBtns">
+          <button class="sm" data-link="1" onclick="toggleLinkBit(1)">IN 1-2</button>
+          <button class="sm" data-link="2" onclick="toggleLinkBit(2)">OUT 1-2</button>
+          <button class="sm" data-link="4" onclick="toggleLinkBit(4)">OUT 3-4</button>
+        </div>
+      </div>
+      <div class="ctrl">
+        <div class="ctrl-lbl"><span>Copy Channel Settings</span></div>
+        <div class="row">
+          <select id="selCopySrc">
+            <option value="IN1">IN A</option><option value="IN2">IN B</option>
+            <option value="OUT1" selected>OUT 1</option><option value="OUT2">OUT 2</option>
+            <option value="OUT3">OUT 3</option><option value="OUT4">OUT 4</option>
+          </select>
+          <span>→</span>
+          <select id="selCopyDst">
+            <option value="ALL" selected>ALL OUTPUTS</option>
+            <option value="IN1">IN A</option><option value="IN2">IN B</option>
+            <option value="OUT1">OUT 1</option><option value="OUT2">OUT 2</option>
+            <option value="OUT3">OUT 3</option><option value="OUT4">OUT 4</option>
+          </select>
+          <button class="accent sm" onclick="doCopyChannel()">Salin</button>
+        </div>
+      </div>
+      <div class="row">
+        <button id="btnSetupLock" onclick="togglePanelLock()" style="flex:1">Panel Lock: OFF</button>
+        <button class="danger sm" onclick="if(confirm('Reboot ESP32-S3?'))sendCmd('RESTART')">Restart ESP32</button>
+      </div>
+    </div>
+
+    <!-- Tema TFT & Mode Warna Hardware -->
+    <div class="card">
+      <h3>Tampilan Layar TFT ST7789 (Tema &amp; Standby)</h3>
+      <div class="ctrl">
+        <div class="ctrl-lbl"><span>7 Tema Warna UI TFT</span></div>
+        <div class="row" id="themeBtns"></div>
+      </div>
+      <div class="ctrl">
+        <div class="ctrl-lbl"><span>4 Mode Warna Hardware Panel</span></div>
+        <div class="row" id="colorModeBtns"></div>
+      </div>
+      <div class="ctrl">
+        <div class="ctrl-lbl"><span>Auto-Standby Timer (0 = OFF, 5–600 dtk)</span><b id="lblStandby">120 dtk</b></div>
+        <div class="row">
+          <input type="range" id="slStandby" min="0" max="600" step="5" value="120" style="flex:1" onchange="setStandby(this.value)" oninput="document.getElementById('lblStandby').textContent=this.value==0?'OFF':this.value+' dtk'">
+        </div>
+      </div>
+    </div>
+
+    <!-- BLE Pairing Config -->
+    <div class="card">
+      <h3>Identitas &amp; Keamanan BLE (Simpan ke NVS)</h3>
+      <div class="ctrl">
+        <div class="ctrl-lbl"><span>Nama Perangkat BLE</span></div>
+        <div class="row">
+          <input type="text" id="inpBleName" value="ESP32-S3-DLMS" maxlength="20" style="flex:1">
+          <button class="primary sm" onclick="saveBleName()">Simpan Nama</button>
+        </div>
+      </div>
+      <div class="ctrl">
+        <div class="ctrl-lbl"><span>PIN Pairing BLE (6 Digit)</span></div>
+        <div class="row">
+          <input type="text" id="inpBlePin" value="123456" maxlength="6" pattern="[0-9]{6}" style="flex:1">
+          <button class="primary sm" onclick="saveBlePin()">Simpan PIN</button>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--dim)">Perubahan Nama/PIN BLE langsung tersimpan di NVS dan me-restart advertising BLE.</div>
+    </div>
+
+    <!-- Logo Converter 240x320 / 320x240 RGB565 & Upload -->
+    <div class="card">
+      <h3>Konverter &amp; Upload Logo RGB565 (Boot / Standby)</h3>
+      <div class="row" style="margin-bottom:8px">
+        <input type="file" id="logoFileInput" accept="image/*" onchange="convertLogoImage(this.files[0])" style="flex:1;font-size:12px">
+      </div>
+      <div class="row" style="margin-bottom:8px">
+        <select id="selLogoTarget" style="flex:1">
+          <option value="BOOT">Boot Logo (/logo_boot.bin)</option>
+          <option value="STANDBY">Standby Logo (/logo_standby.bin)</option>
+        </select>
+        <select id="selLogoDim" onchange="reconvertLogo()" style="flex:1">
+          <option value="320x240" selected>320×240 (Landscape UI)</option>
+          <option value="240x320">240×320 (Portrait Panel)</option>
+        </select>
+      </div>
+      <div class="row" style="margin-bottom:8px;align-items:flex-start">
+        <canvas id="cvLogoPrev" width="160" height="120" style="width:160px;height:120px;border:1px solid var(--border);border-radius:6px;background:#000"></canvas>
+        <div style="flex:1;display:flex;flex-direction:column;gap:6px">
+          <div id="lblLogoInfo" style="font-size:11px;color:var(--dim)">Pilih gambar JPG/PNG untuk dikonversi otomatis ke RGB565 (153.600 byte).</div>
+          <button class="accent sm" id="btnUploadLogo" disabled onclick="uploadLogoToEsp()">Upload ke ESP32-S3</button>
+          <button class="sm" id="btnDlLogo" disabled onclick="downloadLogoBin()">Unduh File .bin</button>
+          <progress id="logoProg" value="0" max="100"></progress>
+        </div>
+      </div>
+    </div>
+
+    <!-- System Info & Console -->
+    <div class="card" style="grid-column:1/-1">
+      <h3>Info Sistem &amp; Konsol Perintah Langsung <button class="sm" onclick="sendCmd('INFO')">Refresh INFO</button></h3>
+      <div class="grid g4" style="margin-bottom:10px;font-size:12px" id="sysInfoCards">
+        <div class="badge between"><span>Firmware</span><b id="infFw">-</b></div>
+        <div class="badge between"><span>Free Heap</span><b id="infHeap">-</b></div>
+        <div class="badge between"><span>Free PSRAM</span><b id="infPsram">-</b></div>
+        <div class="badge between"><span>LittleFS</span><b id="infFs">-</b></div>
+      </div>
+      <div class="row" style="margin-bottom:8px">
+        <input type="text" id="rawCmdInp" placeholder="Contoh: SET OUT1.PEQ1.GAIN 3.5 atau DUMP" style="flex:1" onkeydown="if(event.key==='Enter')sendRawInput()">
+        <button class="primary sm" onclick="sendRawInput()">Kirim</button>
+        <button class="sm" onclick="document.getElementById('cmdLog').textContent=''">Clear</button>
+      </div>
+      <div id="cmdLog"></div>
+    </div>
+  </div>
+</section>
+</main>
+
+<div id="toast"></div>
+
+<script>
+// ============================================================================
+// 1. STATE GLOBAL & DEFAULT DSP CONFIG (100% SINKRON DENGAN FIRMWARE C++)
+// ============================================================================
+const FS = 48000;
+const DEF_FREQS = [40,80,160,315,630,1250,2500,5000,10000];
+const ISO_32 = [20,25,31.5,40,50,63,80,100,125,160,200,250,315,400,500,630,800,1000,1250,1600,2000,2500,3150,4000,5000,6300,8000,10000,12500,16000,20000,22000];
+const THEME_NAMES = ['RED','ICE LUXURY','UNGU-EMAS','MERAH-BIRU','MERAH-PUTIH','BIRU-KUNING','RGB PELANGI'];
+const COLOR_MODES = ['Normal','Negatif','Tukar R-B','Neg+R-B'];
+const CH_NAMES = ['IN A','IN B','OUT 1','OUT 2','OUT 3','OUT 4'];
+const CH_KEYS  = ['IN1','IN2','OUT1','OUT2','OUT3','OUT4'];
+const OUT_COLORS = ['#38e8ff','#ffb830','#24e07c','#c084fc'];
+
+const NUS_SVC = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+const NUS_RX  = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
+const NUS_TX  = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+
+function makeDefaultPeq(){return DEF_FREQS.map(f=>({en:1,type:0,freq:f,gain:0,q:1.4}));}
+function makeDefaultState(){
+  return {
+    preset:'Default Hybrid 2x4', link:0,
+    master:{vol:0,mute:0,rtaSrc:7,fft:512},
+    ui:{theme:1,colorMode:0,standbyEn:1,standbySec:120,lock:0,wifi:0},
+    gen:{type:0,lvl:-20,mask:15,time:30},
+    matrix:[[1,0,1,0],[0,1,0,1],[1,0,0,0],[0,1,0,0]],
+    usbRecPost:1,
+    in:[0,1].map(()=>({g:0,m:0,ph:0,gate:{en:0,thr:-60,atk:2,rel:120},comp:{en:0,thr:-18,ratio:4,atk:10,rel:150,knee:3,makeup:0},peq:makeDefaultPeq()})),
+    out:[0,1,2,3].map(()=>({g:0,m:0,ph:0,byp:0,dly:0,clip:0,hpf:{en:0,type:0,slope:24,freq:80},lpf:{en:0,type:0,slope:24,freq:18000},gate:{en:1,thr:-50,atk:2,rel:150},lim:{en:1,thr:-1,atk:0.5,rel:100},peq:makeDefaultPeq()}))
+  };
+}
+
+let st = makeDefaultState();
+let connMode = 'none'; // 'ws' | 'ble' | 'offline'
+let ws = null, bleDev = null, bleRxChar = null, bleTxChar = null, bleLineBuf = '';
+let bleQueue = [], bleSending = false;
+
+// UI active selections
+let curIn = 0, curOut = 0, curXoOut = 0, xoOverlay = false;
+let curPeqCh = 2, curPeqBand = 0, peqRtaBg = true;
+let curCompCh = 0, curGateCh = 2;
+let rtaPaused = false;
+
+// Telemetry live state
+let tel = {vu:[-96,-96,-96,-96,-96,-96],rms:[-96,-96,-96,-96,-96,-96],gr:[0,0,0,0,0,0],clip:0,lim:0,gate:0,temp:42.5,cpu:14.2,rta:new Array(32).fill(-96)};
+let vuDisp = [-96,-96,-96,-96,-96,-96], vuHold = [-96,-96,-96,-96,-96,-96], vuHoldT = [0,0,0,0,0,0];
+let rtaDisp = new Array(32).fill(-96), rtaPeaks = new Array(32).fill(-96);
+let presetNames = Array.from({length:8},(_,i)=>'Slot '+(i+1));
+
+// Logo converter buffer
+let logoRgb565Bytes = null, logoOrigImg = null;
+
+// ============================================================================
+// 2. HELPERS: TOAST, LOG, FREQ LOG SCALE, BIQUAD MAGNITUDE MATH
+// ============================================================================
+function toast(msg){
+  const el=document.getElementById('toast'); el.textContent=msg; el.classList.add('show');
+  clearTimeout(el._t); el._t=setTimeout(()=>el.classList.remove('show'),1800);
+}
+function logCmd(prefix,msg){
+  const el=document.getElementById('cmdLog'); if(!el) return;
+  el.textContent = `[${prefix}] ${msg}\n` + el.textContent.slice(0,3000);
+}
+const LOG_MIN = Math.log10(20), LOG_MAX = Math.log10(20000), LOG_SPAN = LOG_MAX - LOG_MIN;
+function sliderToFreq(v){ return Math.round(Math.pow(10, LOG_MIN + (v/1000)*LOG_SPAN)*2)/2; }
+function freqToSlider(f){ return Math.round(((Math.log10(Math.max(20,Math.min(20000,f)))-LOG_MIN)/LOG_SPAN)*1000); }
+function xToFreq(x,gx,gw){ return Math.round(Math.pow(10, LOG_MIN + Math.max(0,Math.min(1,(x-gx)/gw))*LOG_SPAN)*2)/2; }
+function freqToX(f,gx,gw){ return gx + ((Math.log10(Math.max(20,Math.min(20000,f)))-LOG_MIN)/LOG_SPAN)*gw; }
+
+function bqMagSq(b0,b1,b2,a1,a2,w){
+  const s=Math.sin(0.5*w), phi=s*s;
+  const nA=b0+b1+b2, dA=1+a1+a2;
+  const num=nA*nA - 4*(b0*b1+4*b0*b2+b1*b2)*phi + 16*b0*b2*phi*phi;
+  const den=dA*dA - 4*(a1+4*a2+a1*a2)*phi + 16*a2*phi*phi;
+  return den<1e-18?1:Math.max(1e-18,num/den);
+}
+function peqMagSq(b,f){
+  if(!b.en) return 1;
+  if(b.type<=2 && Math.abs(b.gain)<0.05) return 1;
+  const fc=Math.max(16,Math.min(20000,b.freq)), Q=Math.max(0.4,Math.min(12,b.q));
+  const A=Math.pow(10,b.gain/40), w0=2*Math.PI*fc/FS, cw=Math.cos(w0), sw=Math.sin(w0), al=sw/(2*Q);
+  let b0=1,b1=0,b2=0,a0=1,a1=0,a2=0;
+  if(b.type===0){b0=1+al*A;b1=-2*cw;b2=1-al*A;a0=1+al/A;a1=-2*cw;a2=1-al/A;}
+  else if(b.type===1){const tA=2*Math.sqrt(A)*(sw/2*Math.sqrt(Math.max(0.01,(A+1/A)*(1/Q-1)+2)));
+    b0=A*((A+1)-(A-1)*cw+tA);b1=2*A*((A-1)-(A+1)*cw);b2=A*((A+1)-(A-1)*cw-tA);
+    a0=(A+1)+(A-1)*cw+tA;a1=-2*((A-1)+(A+1)*cw);a2=(A+1)+(A-1)*cw-tA;}
+  else if(b.type===2){const tA=2*Math.sqrt(A)*(sw/2*Math.sqrt(Math.max(0.01,(A+1/A)*(1/Q-1)+2)));
+    b0=A*((A+1)+(A-1)*cw+tA);b1=-2*A*((A-1)+(A+1)*cw);b2=A*((A+1)+(A-1)*cw-tA);
+    a0=(A+1)-(A-1)*cw+tA;a1=2*((A-1)-(A+1)*cw);a2=(A+1)-(A-1)*cw-tA;}
+  else if(b.type===3){b0=(1-cw)/2;b1=1-cw;b2=b0;a0=1+al;a1=-2*cw;a2=1-al;}
+  else if(b.type===4){b0=(1+cw)/2;b1=-(1+cw);b2=b0;a0=1+al;a1=-2*cw;a2=1-al;}
+  else if(b.type===5){b0=1;b1=-2*cw;b2=1;a0=1+al;a1=-2*cw;a2=1-al;}
+  else return 1;
+  return bqMagSq(b0/a0,b1/a0,b2/a0,a1/a0,a2/a0,2*Math.PI*f/FS);
+}
+const XO_SPEC={
+  0:{12:[[1,.5]],24:[[1,.707107],[1,.707107]],48:[[1,.541196],[1,1.306563],[1,.541196],[1,1.306563]]},
+  1:{12:[[1,.707107]],24:[[1,.541196],[1,1.306563]],48:[[1,.509796],[1,.601345],[1,.899976],[1,2.562915]]},
+  2:{12:[[1.27202,.57735]],24:[[1.43017,.521935],[1.60336,.805538]],48:[[1.77847,.505991],[1.83209,.559609],[1.9532,.710852],[2.18873,1.225669]]}
+};
+function xoMagSq(xo,isHpf,f){
+  if(!xo.en) return 1;
+  const secs=(XO_SPEC[xo.type]||XO_SPEC[0])[xo.slope]||[[1,.707107],[1,.707107]];
+  const w=2*Math.PI*f/FS; let m=1;
+  for(const [sc,q] of secs){
+    const fc=Math.max(10,Math.min(FS*0.475,isHpf?xo.freq/sc:xo.freq*sc));
+    const w0=2*Math.PI*fc/FS, cw=Math.cos(w0), al=Math.sin(w0)/(2*q), iA=1/(1+al);
+    const b0=(isHpf?(1+cw):(1-cw))*0.5*iA, b1=(isHpf?-(1+cw):(1-cw))*iA;
+    m*=bqMagSq(b0,b1,b0,-2*cw*iA,(1-al)*iA,w);
+  }
+  return m;
+}
+function channelMagDb(chIdx,f){
+  let m=1;
+  if(chIdx<2){ for(const b of st.in[chIdx].peq) m*=peqMagSq(b,f); }
+  else{
+    const o=st.out[chIdx-2];
+    if(!o.byp){ m*=xoMagSq(o.hpf,true,f)*xoMagSq(o.lpf,false,f); for(const b of o.peq) m*=peqMagSq(b,f); }
+  }
+  return 10*Math.log10(Math.max(1e-12,m));
+}
+
+// ============================================================================
+// 3. TRANSPORT LAYER: AUTO-DETECT AU-WEB (WS), WEB BLUETOOTH (BLE NUS), OFFLINE
+// ============================================================================
+function setConnUI(mode,label){
+  connMode=mode;
+  const dot=document.getElementById('connDot'), lbl=document.getElementById('connLabel');
+  dot.className='dot '+(mode==='ws'?'ws':mode==='ble'?'ble':'off');
+  lbl.textContent=label;
+  document.getElementById('connectOverlay').classList.add('hidden');
+}
+function openConnectModal(){ document.getElementById('connectOverlay').classList.remove('hidden'); }
+function enterOfflineMode(){ setConnUI('offline','OFFLINE SIM'); toast('Mode Offline Simulasi Aktif'); syncAllUI(); }
+
+function connectWS(){
+  const host = location.hostname || '192.168.4.1';
+  const url = `ws://${host}:81/`;
+  try{ if(ws) ws.close(); }catch(e){}
+  document.getElementById('splashStatus').textContent = 'Menghubungkan ke ' + url + '...';
+  ws = new WebSocket(url);
+  ws.onopen = ()=>{
+    setConnUI('ws','AU-WEB WS');
+    toast('Terhubung ke WiFi AU-WEB!');
+    sendCmd('DUMP'); setTimeout(()=>sendCmd('INFO'),180);
+  };
+  ws.onmessage = (e)=>{ if(typeof e.data==='string') handleIncomingLine(e.data); };
+  ws.onclose = ()=>{ if(connMode==='ws'){ setConnUI('offline','WS TERPUTUS'); toast('Koneksi WebSocket terputus'); } };
+  ws.onerror = ()=>{ document.getElementById('splashStatus').textContent = 'Gagal terhubung ke WebSocket ' + url; };
+}
+
+async function connectBLE(){
+  if(!navigator.bluetooth){ toast('Browser tidak mendukung Web Bluetooth! Gunakan Chrome/Edge.'); return; }
+  try{
+    document.getElementById('splashStatus').textContent='Memindai perangkat BLE NUS...';
+    bleDev = await navigator.bluetooth.requestDevice({
+      filters:[{services:[NUS_SVC]}], optionalServices:[NUS_SVC]
+    });
+    bleDev.addEventListener('gattserverdisconnected',()=>{
+      if(connMode==='ble'){ setConnUI('offline','BLE TERPUTUS'); toast('Koneksi BLE terputus'); }
+    });
+    const srv = await bleDev.gatt.connect();
+    const nus = await srv.getPrimaryService(NUS_SVC);
+    bleRxChar = await nus.getCharacteristic(NUS_RX);
+    bleTxChar = await nus.getCharacteristic(NUS_TX);
+    await bleTxChar.startNotifications();
+    bleTxChar.addEventListener('characteristicvaluechanged', e=>{
+      bleLineBuf += new TextDecoder().decode(e.target.value);
+      let idx;
+      while((idx = bleLineBuf.indexOf('\n')) >= 0){
+        const line = bleLineBuf.slice(0,idx).trim();
+        bleLineBuf = bleLineBuf.slice(idx+1);
+        if(line) handleIncomingLine(line);
+      }
+    });
+    setConnUI('ble','BLE: '+(bleDev.name||'DLMS'));
+    toast('Terhubung via BLE NUS!');
+    sendCmd('DUMP'); setTimeout(()=>sendCmd('INFO'),350);
+  }catch(err){
+    document.getElementById('splashStatus').textContent = 'BLE dibatalkan / gagal: ' + err.message;
+  }
+}
+
+async function flushBleQueue(){
+  if(bleSending || !bleRxChar || bleQueue.length===0) return;
+  bleSending = true;
+  while(bleQueue.length > 0 && connMode==='ble'){
+    const item = bleQueue.shift();
+    try{
+      const bytes = (item instanceof Uint8Array) ? item : new TextEncoder().encode(item);
+      for(let off=0; off<bytes.length; off+=180){
+        const chunk = bytes.slice(off, off+180);
+        if(bleRxChar.properties.writeWithoutResponse) await bleRxChar.writeValueWithoutResponse(chunk);
+        else await bleRxChar.writeValue(chunk);
+      }
+    }catch(e){ break; }
+    await new Promise(r=>setTimeout(r,14));
+  }
+  bleSending = false;
+}
+
+function sendCmd(line){
+  logCmd('TX', line);
+  if(connMode==='ws' && ws && ws.readyState===1){ ws.send(line); }
+  else if(connMode==='ble' && bleRxChar){ bleQueue.push(line + '\n'); flushBleQueue(); }
+}
+function sendRawInput(){
+  const inp=document.getElementById('rawCmdInp');
+  if(inp.value.trim()){ sendCmd(inp.value.trim()); inp.value=''; }
+}
+
+function handleIncomingLine(line){
+  if(!line.startsWith('{')) { logCmd('RX', line); return; }
+  let j; try{ j = JSON.parse(line); }catch(e){ return; }
+  // Live Telemetry (~80ms)
+  if(j.t === 'M'){
+    tel = j;
+    document.getElementById('hdrTemp').textContent = `Temp: ${(j.temp||0).toFixed(1)}°C`;
+    document.getElementById('hdrTemp').classList.toggle('hot', (j.temp||0)>=75);
+    document.getElementById('hdrCpu').textContent = `DSP: ${(j.cpu||0).toFixed(1)}%`;
+    return;
+  }
+  logCmd('RX', line.length>180 ? line.slice(0,180)+'...' : line);
+  // Full DUMP sync
+  if(j.type === 'DUMP'){
+    applyDumpJson(j);
+    toast('Konfigurasi Tersinkron!');
+    return;
+  }
+  if(j.cmd === 'INFO'){
+    document.getElementById('infFw').textContent = j.fw || '-';
+    document.getElementById('infHeap').textContent = ((j.freeHeap||0)/1024).toFixed(1)+' KB';
+    document.getElementById('infPsram').textContent = ((j.freePsram||0)/1048576).toFixed(2)+' MB';
+    document.getElementById('infFs').textContent = `${((j.fsUsed||0)/1024).toFixed(0)}KB / ${((j.fsTotal||0)/1048576).toFixed(1)}MB`;
+    document.getElementById('stUsb').textContent = j.usb ? 'OK 48kHz' : 'WAIT';
+  }
+}
+
+function applyDumpJson(d){
+  st.preset = d.preset || st.preset;
+  st.link = d.link || 0;
+  if(d.master) st.master = {...st.master, ...d.master};
+  if(d.ui) st.ui = {...st.ui, ...d.ui};
+  if(d.gen) st.gen = {...st.gen, ...d.gen};
+  if(d.matrix) st.matrix = d.matrix;
+  if(typeof d.usbRecPost==='number') st.usbRecPost = d.usbRecPost;
+  if(Array.isArray(d.in)){
+    d.in.forEach((c,i)=>{
+      if(!st.in[i]) return;
+      st.in[i].g=c.g; st.in[i].m=c.m; st.in[i].ph=c.ph;
+      if(c.gate) st.in[i].gate={en:c.gate[0],thr:c.gate[1],atk:c.gate[2],rel:c.gate[3]};
+      if(c.comp) st.in[i].comp={en:c.comp[0],thr:c.comp[1],ratio:c.comp[2],atk:c.comp[3],rel:c.comp[4],knee:c.comp[5],makeup:c.comp[6]};
+      if(c.peq) st.in[i].peq=c.peq.map(b=>({en:b[0],type:b[1],freq:b[2],gain:b[3],q:b[4]}));
+    });
+  }
+  if(Array.isArray(d.out)){
+    d.out.forEach((c,i)=>{
+      if(!st.out[i]) return;
+      st.out[i].g=c.g; st.out[i].m=c.m; st.out[i].ph=c.ph; st.out[i].byp=c.byp; st.out[i].dly=c.dly; st.out[i].clip=c.clip;
+      if(c.hpf) st.out[i].hpf={en:c.hpf[0],type:c.hpf[1],slope:c.hpf[2],freq:c.hpf[3]};
+      if(c.lpf) st.out[i].lpf={en:c.lpf[0],type:c.lpf[1],slope:c.lpf[2],freq:c.lpf[3]};
+      if(c.gate) st.out[i].gate={en:c.gate[0],thr:c.gate[1],atk:c.gate[2],rel:c.gate[3]};
+      if(c.lim) st.out[i].lim={en:c.lim[0],thr:c.lim[1],atk:c.lim[2],rel:c.lim[3]};
+      if(c.peq) st.out[i].peq=c.peq.map(b=>({en:b[0],type:b[1],freq:b[2],gain:b[3],q:b[4]}));
+    });
+  }
+  syncAllUI();
+}
+
+// ============================================================================
+// 4. MIRROR STEREO LINK LOCAL + PARAMETER SENDERS
+// ============================================================================
+function partnerCh(chIdx){
+  if(chIdx===0 && (st.link&1)) return 1;
+  if(chIdx===1 && (st.link&1)) return 0;
+  if(chIdx===2 && (st.link&2)) return 3;
+  if(chIdx===3 && (st.link&2)) return 2;
+  if(chIdx===4 && (st.link&4)) return 5;
+  if(chIdx===5 && (st.link&4)) return 4;
+  return -1;
+}
+
+function onMasterVol(v){
+  st.master.vol = parseFloat(v);
+  sendCmd(`MASTER ${st.master.vol.toFixed(1)}`);
+  syncMasterUI();
+}
+function toggleMasterMute(){
+  st.master.mute = st.master.mute ? 0 : 1;
+  sendCmd(`MASTER MUTE ${st.master.mute}`);
+  syncMasterUI();
+}
+function toggleLinkBit(bit){
+  st.link ^= bit;
+  sendCmd(`LINK ${st.link}`);
+  syncLinkUI();
+}
+function togglePanelLock(){
+  st.ui.lock = st.ui.lock ? 0 : 1;
+  sendCmd(`LOCK ${st.ui.lock}`);
+  syncSetupUI();
+}
+
+// Input Stage
+function setInParam(k,v){
+  const val=parseFloat(v); st.in[curIn].g=val;
+  const p=partnerCh(curIn); if(p>=0) st.in[p].g=val;
+  sendCmd(`SET ${CH_KEYS[curIn]}.${k} ${val}`);
+  syncInputUI();
+}
+function toggleInBool(prop,key){
+  st.in[curIn][prop] = st.in[curIn][prop]?0:1;
+  const p=partnerCh(curIn); if(p>=0) st.in[p][prop]=st.in[curIn][prop];
+  sendCmd(`SET ${CH_KEYS[curIn]}.${key} ${st.in[curIn][prop]}`);
+  syncInputUI(); syncHomeMutes();
+}
+function copyInChannel(){
+  const dst = curIn===0?1:0;
+  st.in[dst] = JSON.parse(JSON.stringify(st.in[curIn]));
+  sendCmd(`COPY ${CH_KEYS[curIn]} ${CH_KEYS[dst]}`);
+  toast(`Disalin ke ${CH_NAMES[dst]}`); syncAllUI();
+}
+function setUsbRecPost(v){
+  st.usbRecPost = v; sendCmd(`SET MATRIX.USBREC ${v}`); syncInputUI();
+}
+
+// Output Stage & Matrix
+function setOutParam(k,v){
+  const val=parseFloat(v); st.out[curOut].g=val;
+  const p=partnerCh(curOut+2); if(p>=2) st.out[p-2].g=val;
+  sendCmd(`SET OUT${curOut+1}.${k} ${val}`);
+  syncOutputUI();
+}
+function toggleOutBool(prop,key){
+  st.out[curOut][prop] = st.out[curOut][prop]?0:1;
+  const p=partnerCh(curOut+2); if(p>=2) st.out[p-2][prop]=st.out[curOut][prop];
+  sendCmd(`SET OUT${curOut+1}.${key} ${st.out[curOut][prop]}`);
+  syncOutputUI(); syncHomeMutes();
+}
+function toggleOutClip(){
+  st.out[curOut].clip = st.out[curOut].clip?0:1;
+  sendCmd(`SET OUT${curOut+1}.CLIP ${st.out[curOut].clip}`);
+  syncOutputUI();
+}
+function copyOutToAll(){
+  for(let i=0;i<4;i++) if(i!==curOut) st.out[i]=JSON.parse(JSON.stringify(st.out[curOut]));
+  sendCmd(`COPY OUT${curOut+1} ALL`);
+  toast(`OUT ${curOut+1} disalin ke semua OUT 1–4`); syncAllUI();
+}
+function cycleMatrix(o,s){
+  let g=st.matrix[o][s]; g = g<0.25?0.5:(g<0.75?1.0:0.0);
+  st.matrix[o][s]=g;
+  const srcs=['IN1','IN2','USBL','USBR'];
+  sendCmd(`SET MATRIX.OUT${o+1}.${srcs[s]} ${g.toFixed(2)}`);
+  renderMatrixTable();
+}
+function resetDefaultMatrix(){
+  st.matrix=[[1,0,1,0],[0,1,0,1],[1,0,0,0],[0,1,0,0]];
+  const srcs=['IN1','IN2','USBL','USBR'];
+  for(let o=0;o<4;o++) for(let s=0;s<4;s++) sendCmd(`SET MATRIX.OUT${o+1}.${srcs[s]} ${st.matrix[o][s]}`);
+  renderMatrixTable(); toast('Matrix direset ke Default Hybrid');
+}
+
+// Crossover
+function toggleXoOverlay(){ xoOverlay=!xoOverlay; document.getElementById('btnXoOverlay').classList.toggle('on',xoOverlay); document.getElementById('btnXoOverlay').textContent='Overlay Semua 4 OUT: '+(xoOverlay?'ON':'OFF'); }
+function toggleXo(which){
+  const xo=st.out[curXoOut][which]; xo.en=xo.en?0:1;
+  const p=partnerCh(curXoOut+2); if(p>=2) st.out[p-2][which].en=xo.en;
+  sendCmd(`SET OUT${curXoOut+1}.${which.toUpperCase()}.EN ${xo.en}`);
+  syncXoverUI();
+}
+function setXo(which,field,val){
+  const num=parseFloat(val);
+  const map={TYPE:'type',SLOPE:'slope',FREQ:'freq'};
+  st.out[curXoOut][which][map[field]] = num;
+  const p=partnerCh(curXoOut+2); if(p>=2) st.out[p-2][which][map[field]] = num;
+  sendCmd(`SET OUT${curXoOut+1}.${which.toUpperCase()}.${field} ${num}`);
+  syncXoverUI();
+}
+function setXoLogFreq(which,sv){ setXo(which,'FREQ',sliderToFreq(sv)); }
+
+// PEQ
+function togglePeqRtaBg(){ peqRtaBg=!peqRtaBg; document.getElementById('btnPeqRtaBg').textContent='RTA Latar: '+(peqRtaBg?'ON':'OFF'); }
+function getPeqObj(ch){ return ch<2 ? st.in[ch].peq : st.out[ch-2].peq; }
+function togglePeqEn(){
+  const b=getPeqObj(curPeqCh)[curPeqBand]; b.en=b.en?0:1;
+  const p=partnerCh(curPeqCh); if(p>=0) getPeqObj(p)[curPeqBand].en=b.en;
+  sendCmd(`SET ${CH_KEYS[curPeqCh]}.PEQ${curPeqBand+1}.EN ${b.en}`);
+  syncPeqUI();
+}
+function setPeqField(field,val){
+  const num=parseFloat(val), map={TYPE:'type',FREQ:'freq',GAIN:'gain',Q:'q'};
+  const b=getPeqObj(curPeqCh)[curPeqBand]; b[map[field]]=num;
+  const p=partnerCh(curPeqCh); if(p>=0) getPeqObj(p)[curPeqBand][map[field]]=num;
+  sendCmd(`SET ${CH_KEYS[curPeqCh]}.PEQ${curPeqBand+1}.${field} ${num}`);
+  syncPeqUI();
+}
+function setPeqLogFreq(sv){ setPeqField('FREQ',sliderToFreq(sv)); }
+function flatCurrentPeq(){
+  const arr=getPeqObj(curPeqCh);
+  arr.forEach((b,i)=>{ b.gain=0; b.type=0; b.en=1; b.q=1.4; b.freq=DEF_FREQS[i];
+    sendCmd(`SET ${CH_KEYS[curPeqCh]}.PEQ${i+1}.GAIN 0`); });
+  syncPeqUI(); toast(`PEQ ${CH_NAMES[curPeqCh]} di-flat (0 dB)`);
+}
+
+// Comp / Limiter
+function toggleDynEn(){
+  if(curCompCh<2){
+    const c=st.in[curCompCh].comp; c.en=c.en?0:1;
+    sendCmd(`SET ${CH_KEYS[curCompCh]}.COMP.EN ${c.en}`);
+  }else{
+    const l=st.out[curCompCh-2].lim; l.en=l.en?0:1;
+    sendCmd(`SET ${CH_KEYS[curCompCh]}.LIM.EN ${l.en}`);
+  }
+  syncCompUI();
+}
+function setDynParam(prop,cmdKey,val){
+  const num=parseFloat(val);
+  if(curCompCh<2){
+    st.in[curCompCh].comp[prop]=num;
+    const p=partnerCh(curCompCh); if(p>=0) st.in[p].comp[prop]=num;
+    sendCmd(`SET ${CH_KEYS[curCompCh]}.COMP.${cmdKey} ${num}`);
+  }else{
+    st.out[curCompCh-2].lim[prop]=num;
+    const p=partnerCh(curCompCh); if(p>=2) st.out[p-2].lim[prop]=num;
+    sendCmd(`SET ${CH_KEYS[curCompCh]}.LIM.${cmdKey} ${num}`);
+  }
+  syncCompUI();
+}
+
+// Noise Gate
+function getGateObj(ch){ return ch<2 ? st.in[ch].gate : st.out[ch-2].gate; }
+function toggleGateEn(){
+  const g=getGateObj(curGateCh); g.en=g.en?0:1;
+  const p=partnerCh(curGateCh); if(p>=0) getGateObj(p).en=g.en;
+  sendCmd(`SET ${CH_KEYS[curGateCh]}.GATE.EN ${g.en}`);
+  syncGateUI();
+}
+function setGateParam(key,val){
+  const num=parseFloat(val), map={THR:'thr',ATK:'atk',REL:'rel'};
+  getGateObj(curGateCh)[map[key]]=num;
+  const p=partnerCh(curGateCh); if(p>=0) getGateObj(p)[map[key]]=num;
+  sendCmd(`SET ${CH_KEYS[curGateCh]}.GATE.${key} ${num}`);
+  syncGateUI();
+}
+
+// Delay
+function setDelayMs(outIdx,val){
+  const ms=Math.max(0,Math.min(300,Math.round(parseFloat(val)*10)/10));
+  st.out[outIdx].dly=ms;
+  const p=partnerCh(outIdx+2); if(p>=2) st.out[p-2].dly=ms;
+  sendCmd(`SET OUT${outIdx+1}.DELAY ${ms.toFixed(1)}`);
+  renderDelayGrid();
+}
+
+// Generator
+function setGenType(t){
+  st.gen.type=t; sendCmd(`SET GEN.TYPE ${t}`); syncGenUI();
+}
+function setGenParam(key,val){
+  const num=parseFloat(val);
+  if(key==='LEVEL') st.gen.lvl=num;
+  if(key==='TIME')  st.gen.time=num;
+  sendCmd(`SET GEN.${key} ${num}`);
+  syncGenUI();
+}
+function toggleGenDest(bit){
+  st.gen.mask ^= bit; sendCmd(`SET GEN.MASK ${st.gen.mask}`); syncGenUI();
+}
+
+// RTA & Setup
+function setRtaSrc(v){ st.master.rtaSrc=parseInt(v); sendCmd(`SET RTA.SRC ${v}`); }
+function setRtaFft(v){ st.master.fft=parseInt(v); sendCmd(`SET RTA.FFT ${v}`); }
+function toggleRtaPause(){ rtaPaused=!rtaPaused; document.getElementById('btnRtaHold').classList.toggle('on',rtaPaused); document.getElementById('btnRtaHold').textContent=rtaPaused?'Resume':'Pause'; }
+function setTheme(idx){ st.ui.theme=idx; sendCmd(`THEME ${idx}`); syncSetupUI(); }
+function setColorMode(idx){ st.ui.colorMode=idx; sendCmd(`COLORMODE ${idx}`); syncSetupUI(); }
+function setStandby(sec){ st.ui.standbySec=parseInt(sec); st.ui.standbyEn=sec>0?1:0; sendCmd(`STANDBY ${sec}`); syncSetupUI(); }
+function doCopyChannel(){
+  const s=document.getElementById('selCopySrc').value, d=document.getElementById('selCopyDst').value;
+  sendCmd(`COPY ${s} ${d}`);
+  const si=CH_KEYS.indexOf(s);
+  if(si>=2 && d==='ALL'){ for(let i=0;i<4;i++) st.out[i]=JSON.parse(JSON.stringify(st.out[si-2])); }
+  else{
+    const di=CH_KEYS.indexOf(d);
+    if(si<2 && di<2) st.in[di]=JSON.parse(JSON.stringify(st.in[si]));
+    if(si>=2 && di>=2) st.out[di-2]=JSON.parse(JSON.stringify(st.out[si-2]));
+  }
+  syncAllUI(); toast(`Salin ${s} → ${d} selesai`);
+}
+function saveBleName(){
+  const n=document.getElementById('inpBleName').value.trim().replace(/\s+/g,'-');
+  if(!n) return; sendCmd(`BLENAME ${n}`); toast('Nama BLE disimpan ke NVS');
+}
+function saveBlePin(){
+  const p=document.getElementById('inpBlePin').value.trim();
+  if(!/^\d{6}$/.test(p)){ toast('PIN harus tepat 6 digit angka!'); return; }
+  sendCmd(`BLEPIN ${p}`); toast('PIN BLE disimpan ke NVS');
+}
+
+// Presets
+function presetAction(act,slot){
+  if(act==='RENAME'){
+    const nm=prompt('Nama baru untuk Slot '+(slot+1)+':', presetNames[slot]);
+    if(!nm) return;
+    const clean=nm.trim().replace(/\s+/g,'_').slice(0,16);
+    presetNames[slot]=clean;
+    sendCmd(`PRESET RENAME ${slot} ${clean}`);
+    renderPresets();
+  }else if(act==='SAVE'){
+    sendCmd(`PRESET SAVE ${slot} ${presetNames[slot].replace(/\s+/g,'_')}`);
+    toast(`Slot ${slot+1} disimpan ke LittleFS`);
+  }else if(act==='LOAD'){
+    sendCmd(`PRESET LOAD ${slot}`);
+    setTimeout(()=>sendCmd('DUMP'),200);
+    toast(`Memuat Slot ${slot+1}...`);
+  }else if(act==='DEL'){
+    if(!confirm(`Hapus Preset Slot ${slot+1}?`)) return;
+    sendCmd(`PRESET DEL ${slot}`);
+    presetNames[slot]='Slot '+(slot+1); renderPresets();
+  }
+}
+function exportJsonPreset(){
+  const blob=new Blob([JSON.stringify(st,null,2)],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='dlms_preset.json'; a.click();
+}
+function importJsonPreset(file){
+  if(!file) return;
+  const r=new FileReader();
+  r.onload=()=>{ try{ st=JSON.parse(r.result); syncAllUI(); toast('JSON Diimpor (lokal). Klik Save di slot untuk simpan.'); }catch(e){ toast('File JSON tidak valid!'); } };
+  r.readAsText(file);
+}
+function factoryResetLocal(){ st=makeDefaultState(); syncAllUI(); toast('Konfigurasi direset ke Default Pabrik'); }
+
+// ============================================================================
+// 5. LOGO CONVERTER (AUTO-RESIZE 240x320 / 320x240 RGB565) & UPLOADER
+// ============================================================================
+function convertLogoImage(file){
+  if(!file) return;
+  const img=new Image();
+  img.onload=()=>{ logoOrigImg=img; reconvertLogo(); };
+  img.src=URL.createObjectURL(file);
+}
+function reconvertLogo(){
+  if(!logoOrigImg) return;
+  const dim = document.getElementById('selLogoDim').value;
+  const [tw,th] = dim==='240x320' ? [240,320] : [320,240];
+  const off=document.createElement('canvas'); off.width=tw; off.height=th;
+  const ctx=off.getContext('2d');
+  // Cover-crop proporsional di tengah
+  const scale=Math.max(tw/logoOrigImg.width, th/logoOrigImg.height);
+  const sw=logoOrigImg.width*scale, sh=logoOrigImg.height*scale;
+  ctx.fillStyle='#000'; ctx.fillRect(0,0,tw,th);
+  ctx.drawImage(logoOrigImg,(tw-sw)/2,(th-sh)/2,sw,sh);
+
+  // Preview pada canvas UI
+  const pv=document.getElementById('cvLogoPrev');
+  pv.width=tw/2; pv.height=th/2; pv.style.width=(tw/2)+'px'; pv.style.height=(th/2)+'px';
+  pv.getContext('2d').drawImage(off,0,0,pv.width,pv.height);
+
+  // Konversi RGBA8888 -> RGB565 Big-Endian (sesuai LovyanGFX setSwapBytes(true))
+  const px=ctx.getImageData(0,0,tw,th).data;
+  const out=new Uint8Array(tw*th*2);
+  for(let i=0,o=0;i<px.length;i+=4,o+=2){
+    const rgb565=((px[i]&0xF8)<<8)|((px[i+1]&0xFC)<<3)|(px[i+2]>>3);
+    out[o]=(rgb565>>8)&0xFF; out[o+1]=rgb565&0xFF;
+  }
+  logoRgb565Bytes=out;
+  document.getElementById('lblLogoInfo').textContent=`Siap: ${tw}×${th} RGB565 (${out.length.toLocaleString()} byte)`;
+  document.getElementById('btnUploadLogo').disabled=false;
+  document.getElementById('btnDlLogo').disabled=false;
+}
+function downloadLogoBin(){
+  if(!logoRgb565Bytes) return;
+  const tgt=document.getElementById('selLogoTarget').value==='STANDBY'?'logo_standby.bin':'logo_boot.bin';
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([logoRgb565Bytes])); a.download=tgt; a.click();
+}
+async function uploadLogoToEsp(){
+  if(!logoRgb565Bytes) return;
+  if(connMode==='offline'){ toast('Hubungkan via AU-WEB atau BLE dulu (atau Unduh .bin)'); return; }
+  const tgt=document.getElementById('selLogoTarget').value;
+  const total=logoRgb565Bytes.length;
+  const prog=document.getElementById('logoProg'); prog.value=0;
+  sendCmd(`LOGO ${tgt} ${total}`);
+  await new Promise(r=>setTimeout(r,200));
+
+  if(connMode==='ws' && ws && ws.readyState===1){
+    const CHUNK=2048;
+    for(let off=0; off<total; off+=CHUNK){
+      ws.send(logoRgb565Bytes.slice(off, off+CHUNK));
+      prog.value=Math.round((Math.min(off+CHUNK,total)/total)*100);
+      await new Promise(r=>setTimeout(r,15));
+    }
+    toast('Logo berhasil dikirim via WebSocket!');
+  }else if(connMode==='ble' && bleRxChar){
+    // Kirim chunk base64 `LOGO_DATA <b64>` via BLE NUS
+    const CHUNK=120; // 120 raw bytes -> 160 chars base64 (< 180B MTU)
+    for(let off=0; off<total; off+=CHUNK){
+      const slice=logoRgb565Bytes.slice(off,off+CHUNK);
+      let bin=''; for(let i=0;i<slice.length;i++) bin+=String.fromCharCode(slice[i]);
+      sendCmd('LOGO_DATA ' + btoa(bin));
+      prog.value=Math.round((Math.min(off+CHUNK,total)/total)*100);
+      while(bleQueue.length>4) await new Promise(r=>setTimeout(r,20));
+    }
+    toast('Logo dikirim via BLE NUS!');
+  }
+}
+
+// ============================================================================
+// 6. UI RENDERERS & DOM BINDINGS
+// ============================================================================
+function buildPills(elId, labels, activeIdx, onClick){
+  const el=document.getElementById(elId); el.innerHTML='';
+  labels.forEach((lbl,i)=>{
+    const b=document.createElement('button');
+    b.className='ch-pill'+(i===activeIdx?' active':'');
+    b.textContent=lbl; b.onclick=()=>onClick(i); el.appendChild(b);
+  });
+}
+
+function syncMasterUI(){
+  const v=st.master.vol;
+  document.getElementById('slMasterVol').value=v;
+  document.getElementById('slSetupMaster').value=v;
+  document.getElementById('lblMasterVol').textContent=v.toFixed(1)+' dB';
+  document.getElementById('lblSetupMaster').textContent=v.toFixed(1)+' dB';
+  const m=st.master.mute;
+  ['btnMasterMute','btnHdrMute'].forEach(id=>{
+    const b=document.getElementById(id); b.classList.toggle('muted',!!m);
+    b.textContent=(id==='btnHdrMute')?(m?'MUTED':'MUTE'):('Master Mute: '+(m?'ON':'OFF'));
+  });
+}
+function syncLinkUI(){
+  const lbls=[]; if(st.link&1)lbls.push('IN'); if(st.link&2)lbls.push('O12'); if(st.link&4)lbls.push('O34');
+  const txt=lbls.length?lbls.join('+'):'OFF';
+  document.getElementById('hdrLink').textContent='LINK: '+txt;
+  document.getElementById('lblSetupLink').textContent=txt;
+  document.querySelectorAll('[data-link]').forEach(b=>{
+    b.classList.toggle('on', (st.link & parseInt(b.dataset.link))!==0);
+  });
+}
+function syncHomeMutes(){
+  const row=document.getElementById('homeMuteRow'); row.innerHTML='';
+  CH_NAMES.forEach((nm,i)=>{
+    const muted = i<2 ? st.in[i].m : st.out[i-2].m;
+    const b=document.createElement('button');
+    b.className='sm'+(muted?' muted':''); b.style.flex='1';
+    b.textContent=nm+(muted?' ✕':'');
+    b.onclick=()=>{
+      if(i<2){ curIn=i; toggleInBool('m','MUTE'); } else { curOut=i-2; toggleOutBool('m','MUTE'); }
+    };
+    row.appendChild(b);
+  });
+}
+function syncInputUI(){
+  buildPills('inPills',['IN A (ADC L)','IN B (ADC R)'],curIn,i=>{curIn=i;syncInputUI();});
+  const c=st.in[curIn];
+  document.getElementById('inTitle').textContent=CH_NAMES[curIn];
+  document.getElementById('slInGain').value=c.g;
+  document.getElementById('lblInGain').textContent=(c.g>=0?'+':'')+c.g.toFixed(1)+' dB';
+  const bm=document.getElementById('btnInMute'); bm.textContent='Mute: '+(c.m?'ON':'OFF'); bm.classList.toggle('muted',!!c.m);
+  const bp=document.getElementById('btnInPhase'); bp.textContent='Phase: '+(c.ph?'180°':'0°'); bp.classList.toggle('warn',!!c.ph);
+  document.getElementById('lblUsbTap').textContent=st.usbRecPost?'POST INPUT DSP':'RAW ADC';
+  document.getElementById('btnTapPost').classList.toggle('on',!!st.usbRecPost);
+  document.getElementById('btnTapRaw').classList.toggle('on',!st.usbRecPost);
+  const actPeq=c.peq.filter(b=>b.en && Math.abs(b.gain)>=0.05).length;
+  document.getElementById('inSummary').innerHTML=
+    `• Noise Gate: <b>${c.gate.en?'ON':'OFF'}</b> (${c.gate.thr} dB)<br>`+
+    `• 9-Band PEQ: <b>${actPeq} band aktif</b><br>`+
+    `• Compressor: <b>${c.comp.en?'ON':'OFF'}</b> (${c.comp.thr} dB, ${c.comp.ratio}:1, Knee ${c.comp.knee} dB)`;
+}
+function syncOutputUI(){
+  buildPills('outPills',['OUT 1','OUT 2','OUT 3','OUT 4'],curOut,i=>{curOut=i;syncOutputUI();});
+  const o=st.out[curOut];
+  document.getElementById('outTitle').textContent='OUT '+(curOut+1);
+  document.getElementById('slOutGain').value=o.g;
+  document.getElementById('lblOutGain').textContent=(o.g>=0?'+':'')+o.g.toFixed(1)+' dB';
+  const bm=document.getElementById('btnOutMute'); bm.textContent='Mute: '+(o.m?'ON':'OFF'); bm.classList.toggle('muted',!!o.m);
+  const bp=document.getElementById('btnOutPhase'); bp.textContent='Phase: '+(o.ph?'180°':'0°'); bp.classList.toggle('warn',!!o.ph);
+  const bb=document.getElementById('btnOutBypass'); bb.textContent='DSP Bypass: '+(o.byp?'ON':'OFF'); bb.classList.toggle('warn',!!o.byp);
+  document.getElementById('btnOutClip').textContent='Anti-Clip: '+(o.clip?'HARD CLIP':'SOFT TANH');
+  renderMatrixTable();
+}
+function renderMatrixTable(){
+  const tbl=document.getElementById('matrixTable');
+  let h='<tr><th>OUT \\ SRC</th><th>IN A</th><th>IN B</th><th>USB L</th><th>USB R</th></tr>';
+  for(let o=0;o<4;o++){
+    h+=`<tr><th>OUT ${o+1}</th>`;
+    for(let s=0;s<4;s++){
+      const g=st.matrix[o][s], cls=g>0.75?'m100':(g>0.25?'m50':'');
+      h+=`<td><button class="mx-btn ${cls}" onclick="cycleMatrix(${o},${s})">${Math.round(g*100)}%</button></td>`;
+    }
+    h+='</tr>';
+  }
+  tbl.innerHTML=h;
+}
+function syncXoverUI(){
+  buildPills('xoPills',['OUT 1','OUT 2','OUT 3','OUT 4'],curXoOut,i=>{curXoOut=i;syncXoverUI();});
+  const o=st.out[curXoOut];
+  ['hpf','lpf'].forEach(w=>{
+    const f=o[w], W=w==='hpf'?'Hpf':'Lpf';
+    const b=document.getElementById('btn'+W+'En'); b.textContent=f.en?'ON':'OFF'; b.classList.toggle('on',!!f.en);
+    document.getElementById('sel'+W+'Type').value=f.type;
+    document.getElementById('sel'+W+'Slope').value=f.slope;
+    document.getElementById('sl'+W+'Freq').value=freqToSlider(f.freq);
+    document.getElementById('lbl'+W+'Freq').textContent=f.freq.toFixed(1)+' Hz';
+  });
+}
+function syncPeqUI(){
+  buildPills('peqPills',CH_NAMES,curPeqCh,i=>{curPeqCh=i;syncPeqUI();});
+  document.getElementById('peqChBadge').textContent=CH_NAMES[curPeqCh];
+  const bands=getPeqObj(curPeqCh), strip=document.getElementById('peqBandStrip');
+  strip.innerHTML='';
+  bands.forEach((b,i)=>{
+    const el=document.createElement('button');
+    el.className='band-btn'+(i===curPeqBand?' active':'')+(b.gain>0.1?' boost':(b.gain<-0.1?' cut':''));
+    el.innerHTML=`B${i+1}<br><span style="font-size:9px">${b.freq>=1000?(b.freq/1000).toFixed(1)+'k':Math.round(b.freq)}</span>`;
+    el.onclick=()=>{curPeqBand=i;syncPeqUI();};
+    strip.appendChild(el);
+  });
+  const b=bands[curPeqBand];
+  document.getElementById('lblPeqBand').textContent=`B${curPeqBand+1}`;
+  const ben=document.getElementById('btnPeqEn'); ben.textContent=b.en?'ON':'OFF'; ben.classList.toggle('on',!!b.en);
+  document.getElementById('selPeqType').value=b.type;
+  document.getElementById('slPeqFreq').value=freqToSlider(b.freq);
+  document.getElementById('lblPeqFreq').textContent=b.freq.toFixed(1)+' Hz';
+  document.getElementById('slPeqGain').value=b.gain;
+  document.getElementById('lblPeqGain').textContent=(b.gain>=0?'+':'')+b.gain.toFixed(1)+' dB';
+  document.getElementById('slPeqQ').value=b.q;
+  document.getElementById('lblPeqQ').textContent=b.q.toFixed(1);
+}
+function syncCompUI(){
+  buildPills('compPills',CH_NAMES,curCompCh,i=>{curCompCh=i;syncCompUI();});
+  const isIn=curCompCh<2;
+  document.getElementById('compModeLbl').textContent=isIn?'INPUT COMPRESSOR':'OUTPUT PEAK LIMITER';
+  const obj=isIn?st.in[curCompCh].comp:st.out[curCompCh-2].lim;
+  const ben=document.getElementById('btnDynEn'); ben.textContent=obj.en?'ON':'OFF'; ben.classList.toggle('on',!!obj.en);
+  const box=document.getElementById('compSliders');
+  const mk=(lbl,val,unit,min,max,step,prop,key)=>`<div class="ctrl"><div class="ctrl-lbl"><span>${lbl}</span><b>${val}${unit}</b></div><input type="range" min="${min}" max="${max}" step="${step}" value="${val}" oninput="setDynParam('${prop}','${key}',this.value)"></div>`;
+  if(isIn){
+    box.innerHTML=
+      mk('Threshold',obj.thr,' dB',-60,0,1,'thr','THR')+
+      mk('Ratio',obj.ratio,':1',1,20,0.5,'ratio','RATIO')+
+      mk('Soft Knee',obj.knee,' dB',0,12,0.5,'knee','KNEE')+
+      mk('Attack',obj.atk,' ms',0.1,200,0.5,'atk','ATK')+
+      mk('Release',obj.rel,' ms',10,2000,10,'rel','REL')+
+      mk('Makeup Gain',obj.makeup,' dB',0,18,0.5,'makeup','MAKEUP');
+  }else{
+    box.innerHTML=
+      mk('Limiter Threshold',obj.thr,' dBFS',-30,0,0.5,'thr','THR')+
+      mk('Attack',obj.atk,' ms',0.05,50,0.1,'atk','ATK')+
+      mk('Release',obj.rel,' ms',10,2000,10,'rel','REL')+
+      `<div class="row" style="margin-top:8px"><button class="sm" onclick="curOut=${curCompCh-2};toggleOutClip();syncCompUI()">Anti-Clip: ${st.out[curCompCh-2].clip?'HARD CLIP':'SOFT TANH'}</button></div>`;
+  }
+}
+function syncGateUI(){
+  buildPills('gatePills',CH_NAMES,curGateCh,i=>{curGateCh=i;syncGateUI();});
+  document.getElementById('gateChLbl').textContent=CH_NAMES[curGateCh];
+  const g=getGateObj(curGateCh);
+  const b=document.getElementById('btnGateEn'); b.textContent=g.en?'ON':'OFF'; b.classList.toggle('on',!!g.en);
+  document.getElementById('slGateThr').value=g.thr; document.getElementById('lblGateThr').textContent=g.thr.toFixed(1)+' dB';
+  document.getElementById('slGateAtk').value=g.atk; document.getElementById('lblGateAtk').textContent=g.atk.toFixed(1)+' ms';
+  document.getElementById('slGateRel').value=g.rel; document.getElementById('lblGateRel').textContent=g.rel.toFixed(0)+' ms';
+}
+function renderDelayGrid(){
+  const el=document.getElementById('delayGrid'); el.innerHTML='';
+  st.out.forEach((o,i)=>{
+    const distM=(o.dly*0.343).toFixed(2), distCm=(o.dly*34.3).toFixed(0);
+    el.innerHTML+=`<div class="card" style="background:var(--bg2)">
+      <h3>OUT ${i+1} Delay <b style="color:var(--accent2)">${o.dly.toFixed(1)} ms (${distM} m / ${distCm} cm)</b></h3>
+      <input type="range" min="0" max="300" step="0.5" value="${o.dly}" oninput="setDelayMs(${i},this.value)">
+      <div class="row" style="margin-top:8px">
+        <button class="sm" onclick="setDelayMs(${i},${Math.max(0,o.dly-1)})">-1 ms</button>
+        <button class="sm" onclick="setDelayMs(${i},${Math.max(0,o.dly-0.1)})">-0.1</button>
+        <button class="sm" onclick="setDelayMs(${i},0)">0 ms</button>
+        <button class="sm" onclick="setDelayMs(${i},${Math.min(300,o.dly+0.1)})">+0.1</button>
+        <button class="sm" onclick="setDelayMs(${i},${Math.min(300,o.dly+1)})">+1 ms</button>
+      </div></div>`;
+  });
+}
+function syncGenUI(){
+  ['btnGenOff','btnGenWhite','btnGenPink'].forEach((id,i)=>document.getElementById(id).classList.toggle('on',st.gen.type===i));
+  document.getElementById('slGenLvl').value=st.gen.lvl;
+  document.getElementById('lblGenLvl').textContent=st.gen.lvl.toFixed(1)+' dBFS';
+  document.getElementById('slGenTime').value=st.gen.time;
+  document.getElementById('lblGenTime').textContent=st.gen.time+' detik';
+  document.getElementById('stGen').textContent=['OFF','WHITE','PINK'][st.gen.type]||'OFF';
+  const box=document.getElementById('genDestBtns'); box.innerHTML='';
+  for(let i=0;i<4;i++){
+    const b=document.createElement('button');
+    b.className='sm'+((st.gen.mask&(1<<i))?' on':''); b.textContent='OUT '+(i+1);
+    b.onclick=()=>toggleGenDest(1<<i); box.appendChild(b);
+  }
+}
+function renderPresets(){
+  const el=document.getElementById('presetList'); el.innerHTML='';
+  presetNames.forEach((nm,i)=>{
+    el.innerHTML+=`<div class="preset-row">
+      <div><b>#${i+1}</b> <span>${nm}</span></div>
+      <div class="row">
+        <button class="sm ok" onclick="presetAction('LOAD',${i})">Load</button>
+        <button class="sm primary" onclick="presetAction('SAVE',${i})">Save</button>
+        <button class="sm" onclick="presetAction('RENAME',${i})">Rename</button>
+        <button class="sm danger" onclick="presetAction('DEL',${i})">Del</button>
+      </div></div>`;
+  });
+}
+function syncSetupUI(){
+  const lk=st.ui.lock;
+  ['btnHomeLock','btnSetupLock'].forEach(id=>{
+    const b=document.getElementById(id); b.textContent='Panel Lock: '+(lk?'TERKUNCI':'OFF'); b.classList.toggle('warn',!!lk);
+  });
+  document.getElementById('stPreset').textContent=st.preset;
+  document.getElementById('stTheme').textContent=THEME_NAMES[st.ui.theme]||'RED';
+  document.getElementById('slStandby').value=st.ui.standbyEn?st.ui.standbySec:0;
+  document.getElementById('lblStandby').textContent=st.ui.standbyEn?(st.ui.standbySec+' dtk'):'OFF';
+  document.getElementById('selRtaSrc').value=st.master.rtaSrc;
+  document.getElementById('selRtaFft').value=st.master.fft;
+
+  const tb=document.getElementById('themeBtns'); tb.innerHTML='';
+  THEME_NAMES.forEach((n,i)=>{
+    const b=document.createElement('button'); b.className='sm'+(st.ui.theme===i?' on':'');
+    b.textContent=n; b.onclick=()=>setTheme(i); tb.appendChild(b);
+  });
+  const cb=document.getElementById('colorModeBtns'); cb.innerHTML='';
+  COLOR_MODES.forEach((n,i)=>{
+    const b=document.createElement('button'); b.className='sm'+(st.ui.colorMode===i?' on':'');
+    b.textContent=n; b.onclick=()=>setColorMode(i); cb.appendChild(b);
+  });
+}
+function syncAllUI(){
+  syncMasterUI(); syncLinkUI(); syncHomeMutes(); syncInputUI(); syncOutputUI();
+  syncXoverUI(); syncPeqUI(); syncCompUI(); syncGateUI(); renderDelayGrid();
+  syncGenUI(); renderPresets(); syncSetupUI();
+}
+function jumpToTab(tabId, chIdx){
+  if(tabId==='peq') curPeqCh=chIdx;
+  if(tabId==='comp') curCompCh=chIdx;
+  if(tabId==='gate') curGateCh=chIdx;
+  activateTab(tabId); syncAllUI();
+}
+
+// ============================================================================
+// 7. INTERACTIVE HTML5 CANVAS DRAGGING (PEQ & CROSSOVER)
+// ============================================================================
+function setupCanvasInteraction(){
+  // A. PEQ Canvas Drag (B1-B9) + Wheel Q
+  const cvP=document.getElementById('cvPeq');
+  let dragBand=-1;
+  const getRect=(cv)=>{const r=cv.getBoundingClientRect(); return {w:r.width,h:r.height,gx:36,gy:14,gw:r.width-48,gh:r.height-36};};
+
+  cvP.addEventListener('pointerdown',e=>{
+    const r=cvP.getBoundingClientRect(), x=e.clientX-r.left, y=e.clientY-r.top, g=getRect(cvP);
+    const bands=getPeqObj(curPeqCh);
+    let best=-1, bestD=26;
+    bands.forEach((b,i)=>{
+      const bx=freqToX(b.freq,g.gx,g.gw);
+      const by=g.gy+g.gh/2 - (b.gain/18)*(g.gh/2);
+      const d=Math.hypot(x-bx,y-by);
+      if(d<bestD){bestD=d;best=i;}
+    });
+    if(best>=0){ dragBand=best; curPeqBand=best; cvP.setPointerCapture(e.pointerId); syncPeqUI(); }
+  });
+  cvP.addEventListener('pointermove',e=>{
+    if(dragBand<0) return;
+    const r=cvP.getBoundingClientRect(), x=e.clientX-r.left, y=e.clientY-r.top, g=getRect(cvP);
+    const f=xToFreq(x,g.gx,g.gw);
+    const gain=Math.max(-15,Math.min(15,Math.round((((g.gy+g.gh/2)-y)/(g.gh/2))*18*2)/2));
+    const b=getPeqObj(curPeqCh)[dragBand];
+    b.freq=f; b.gain=gain; b.en=1;
+    const p=partnerCh(curPeqCh); if(p>=0){ const pb=getPeqObj(p)[dragBand]; pb.freq=f; pb.gain=gain; pb.en=1; }
+    syncPeqUI();
+    throttledSend(`PEQ_${dragBand}`, ()=>{
+      sendCmd(`SET ${CH_KEYS[curPeqCh]}.PEQ${dragBand+1}.FREQ ${f.toFixed(1)}`);
+      sendCmd(`SET ${CH_KEYS[curPeqCh]}.PEQ${dragBand+1}.GAIN ${gain.toFixed(1)}`);
+    });
+  });
+  cvP.addEventListener('pointerup',()=>{dragBand=-1;});
+  cvP.addEventListener('wheel',e=>{
+    e.preventDefault();
+    const b=getPeqObj(curPeqCh)[curPeqBand];
+    const nq=Math.max(0.4,Math.min(12,Math.round((b.q + (e.deltaY<0?0.2:-0.2))*10)/10));
+    setPeqField('Q',nq);
+  },{passive:false});
+
+  // B. Crossover Canvas Drag (HPF / LPF handle)
+  const cvX=document.getElementById('cvXover');
+  let dragXo=null;
+  cvX.addEventListener('pointerdown',e=>{
+    const r=cvX.getBoundingClientRect(), x=e.clientX-r.left, g=getRect(cvX);
+    const o=st.out[curXoOut];
+    const hx=freqToX(o.hpf.freq,g.gx,g.gw), lx=freqToX(o.lpf.freq,g.gx,g.gw);
+    if(Math.abs(x-hx)<24 && o.hpf.en) dragXo='hpf';
+    else if(Math.abs(x-lx)<24 && o.lpf.en) dragXo='lpf';
+    if(dragXo) cvX.setPointerCapture(e.pointerId);
+  });
+  cvX.addEventListener('pointermove',e=>{
+    if(!dragXo) return;
+    const r=cvX.getBoundingClientRect(), x=e.clientX-r.left, g=getRect(cvX);
+    const f=xToFreq(x,g.gx,g.gw);
+    st.out[curXoOut][dragXo].freq=f;
+    const p=partnerCh(curXoOut+2); if(p>=2) st.out[p-2][dragXo].freq=f;
+    syncXoverUI();
+    throttledSend('XO_'+dragXo, ()=>sendCmd(`SET OUT${curXoOut+1}.${dragXo.toUpperCase()}.FREQ ${f.toFixed(1)}`));
+  });
+  cvX.addEventListener('pointerup',()=>{dragXo=null;});
+}
+
+const _thTimers={};
+function throttledSend(key,fn){
+  if(_thTimers[key]) return;
+  _thTimers[key]=setTimeout(()=>{ _thTimers[key]=null; fn(); }, 45);
+}
+
+// ============================================================================
+// 8. CANVAS RENDERING ENGINE (60/30 FPS) + OFFLINE SIMULATION
+// ============================================================================
+function prepCanvas(id){
+  const cv=document.getElementById(id); if(!cv) return null;
+  const dpr=window.devicePixelRatio||1, w=cv.clientWidth||320, h=parseInt(cv.getAttribute('height'))||240;
+  if(cv.width!==Math.round(w*dpr)||cv.height!==Math.round(h*dpr)){ cv.width=Math.round(w*dpr); cv.height=Math.round(h*dpr); }
+  const ctx=cv.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0);
+  return {ctx,w,h};
+}
+
+function updateOfflineSimulation(tSec){
+  if(connMode!=='offline') return;
+  const masterLin = st.master.mute ? 0 : Math.pow(10, st.master.vol/20);
+  const pulse = 0.55 + 0.35*Math.sin(tSec*2.6) + 0.1*Math.sin(tSec*11.3);
+  const genOn = st.gen.type!==0;
+  const baseIn = -16 + pulse*10;
+
+  for(let i=0;i<2;i++){
+    let lv = st.in[i].m ? -96 : Math.min(0, baseIn + st.in[i].g + (i? -1.2 : 0));
+    let gr = 0;
+    if(st.in[i].comp.en && lv > st.in[i].comp.thr){
+      gr = ((1/st.in[i].comp.ratio)-1)*(lv - st.in[i].comp.thr);
+      lv += gr + st.in[i].comp.makeup;
+    }
+    tel.vu[i]=lv; tel.rms[i]=lv-3.5; tel.gr[i]=gr;
+  }
+  tel.lim=0; tel.clip=0; tel.gate=0;
+  for(let o=0;o<4;o++){
+    let lv = st.out[o].m ? -96 : (genOn ? st.gen.lvl : (-14 + pulse*11 + st.out[o].g));
+    if(masterLin===0) lv=-96; else lv += st.master.vol;
+    if(st.out[o].gate.en && lv < st.out[o].gate.thr){ tel.gate |= (1<<(o+2)); lv=-96; }
+    let lgr=0;
+    if(st.out[o].lim.en && lv > st.out[o].lim.thr){ lgr=st.out[o].lim.thr-lv; lv=st.out[o].lim.thr; tel.lim|=(1<<o); }
+    if(lv>-0.3) tel.clip|=(1<<(o+2));
+    tel.vu[o+2]=lv; tel.rms[o+2]=lv-3.2; tel.gr[o+2]=lgr;
+  }
+  const srcCh = st.master.rtaSrc < 6 ? st.master.rtaSrc : 2;
+  for(let b=0;b<32;b++){
+    const f=ISO_32[b], curve=channelMagDb(srcCh,f);
+    const pinkSlope = -18 - b*0.45 + Math.sin(tSec*5 + b*0.7)*4 + (Math.random()-0.5)*3;
+    tel.rta[b] = st.master.mute ? -96 : Math.max(-96, Math.min(0, pinkSlope + curve*0.7 + st.master.vol));
+  }
+  document.getElementById('hdrTemp').textContent=`Temp: ${(41.2+Math.sin(tSec*0.3)*0.6).toFixed(1)}°C`;
+  document.getElementById('hdrCpu').textContent='DSP: 15.8%';
+}
+
+function drawVuCanvas(now){
+  const p=prepCanvas('cvVu'); if(!p) return;
+  const {ctx,w,h}=p;
+  ctx.fillStyle='#070c17'; ctx.fillRect(0,0,w,h);
+  const top=26, bot=h-30, bh=bot-top, left=34, spanW=(w-left-12)/6;
+
+  // dB Grid
+  ctx.font='10px system-ui'; ctx.textAlign='right';
+  [0,-6,-12,-24,-48].forEach(db=>{
+    const y=bot - ((db+60)/60)*bh;
+    ctx.strokeStyle='#1b2b4a'; ctx.beginPath(); ctx.moveTo(left,y); ctx.lineTo(w-8,y); ctx.stroke();
+    ctx.fillStyle='#6f88b0'; ctx.fillText(db, left-5, y+3);
+  });
+
+  for(let i=0;i<6;i++){
+    const raw=Math.max(-60,Math.min(0,tel.vu[i]??-96));
+    vuDisp[i] = raw>vuDisp[i] ? raw : Math.max(-60, vuDisp[i]-1.2);
+    if(raw>=vuHold[i]){ vuHold[i]=raw; vuHoldT[i]=now; }
+    else if(now-vuHoldT[i]>1100){ vuHold[i]=Math.max(-60,vuHold[i]-0.5); }
+
+    const cx=left + i*spanW + spanW*0.18, bw=Math.min(34,spanW*0.64);
+    ctx.fillStyle='#101a2e'; ctx.fillRect(cx,top,bw,bh);
+    ctx.strokeStyle='#243658'; ctx.strokeRect(cx,top,bw,bh);
+
+    const fillH=((vuDisp[i]+60)/60)*(bh-4);
+    for(let s=0;s<fillH;s+=5){
+      const ratio=s/(bh-4);
+      ctx.fillStyle = ratio>0.88?'#ff3b57':(ratio>0.70?'#ffb830':'#24e07c');
+      ctx.fillRect(cx+2, bot-2-s-3, bw-4, 3);
+    }
+    // Peak Hold Line
+    const pkY=bot-2-((vuHold[i]+60)/60)*(bh-4);
+    ctx.fillStyle='#fff'; ctx.fillRect(cx+2,pkY,bw-4,2);
+
+    // Badges CLIP / LIM / GR
+    ctx.textAlign='center'; ctx.font='bold 10px system-ui';
+    const isClip=(tel.clip&(1<<i))!==0, isLim=(i>=2)&&((tel.lim&(1<<(i-2)))!==0);
+    if(isClip){ ctx.fillStyle='#ff3b57'; ctx.fillRect(cx,6,bw,15); ctx.fillStyle='#fff'; ctx.fillText('CLIP',cx+bw/2,17); }
+    else if(isLim){ ctx.fillStyle='#ffb830'; ctx.fillRect(cx,6,bw,15); ctx.fillStyle='#000'; ctx.fillText('LIM',cx+bw/2,17); }
+    else { ctx.fillStyle='#8ba0c4'; ctx.fillText(vuHold[i].toFixed(0),cx+bw/2,17); }
+
+    ctx.fillStyle=i<2?'#38e8ff':'#ffb830';
+    ctx.fillText(CH_NAMES[i], cx+bw/2, h-15);
+    if(tel.gr[i]<-0.2){ ctx.fillStyle='#ff9f43'; ctx.font='9px system-ui'; ctx.fillText('GR '+tel.gr[i].toFixed(1), cx+bw/2, h-4); }
+  }
+}
+
+function drawFreqGrid(ctx,w,h,gx,gy,gw,gh,dbRange){
+  ctx.fillStyle='#070c17'; ctx.fillRect(0,0,w,h);
+  const midY=gy+gh/2;
+  ctx.font='10px system-ui';
+  [-dbRange,-dbRange/2,0,dbRange/2,dbRange].forEach(db=>{
+    const y=midY-(db/dbRange)*(gh/2);
+    ctx.strokeStyle=db===0?'#3b5582':'#172540';
+    ctx.beginPath(); ctx.moveTo(gx,y); ctx.lineTo(gx+gw,y); ctx.stroke();
+    ctx.fillStyle='#6f88b0'; ctx.textAlign='right'; ctx.fillText((db>0?'+':'')+db, gx-5, y+3);
+  });
+  [20,50,100,200,500,1000,2000,5000,10000,20000].forEach(f=>{
+    const x=freqToX(f,gx,gw);
+    ctx.strokeStyle='#172540'; ctx.beginPath(); ctx.moveTo(x,gy); ctx.lineTo(x,gy+gh); ctx.stroke();
+    ctx.fillStyle='#6f88b0'; ctx.textAlign='center'; ctx.fillText(f>=1000?(f/1000)+'k':f, x, gy+gh+13);
+  });
+}
+
+function drawPeqCanvas(){
+  const p=prepCanvas('cvPeq'); if(!p) return;
+  const {ctx,w,h}=p, gx=36, gy=14, gw=w-48, gh=h-36, midY=gy+gh/2;
+  drawFreqGrid(ctx,w,h,gx,gy,gw,gh,18);
+
+  // RTA overlay behind curve
+  if(peqRtaBg){
+    const bw=gw/32;
+    ctx.fillStyle='rgba(56,232,255,0.14)';
+    for(let i=0;i<32;i++){
+      const n=Math.max(0,Math.min(1,(rtaDisp[i]+80)/80));
+      const bh=n*gh;
+      ctx.fillRect(gx+i*bw+1, gy+gh-bh, Math.max(2,bw-2), bh);
+    }
+  }
+  // Combined curve
+  ctx.strokeStyle='#38e8ff'; ctx.lineWidth=2.5; ctx.beginPath();
+  for(let i=0;i<=120;i++){
+    const f=Math.pow(10,LOG_MIN+(i/120)*LOG_SPAN);
+    const db=Math.max(-24,Math.min(18,channelMagDb(curPeqCh,f)));
+    const x=gx+(i/120)*gw, y=Math.max(gy,Math.min(gy+gh,midY-(db/18)*(gh/2)));
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+
+  // 9 Draggable PEQ Nodes
+  const bands=getPeqObj(curPeqCh);
+  bands.forEach((b,i)=>{
+    const x=freqToX(b.freq,gx,gw), y=Math.max(gy+6,Math.min(gy+gh-6,midY-(b.gain/18)*(gh/2)));
+    const sel=(i===curPeqBand);
+    ctx.beginPath(); ctx.arc(x,y,sel?9:6.5,0,Math.PI*2);
+    ctx.fillStyle=sel?'#ffb830':(b.en?'#38e8ff':'#475569'); ctx.fill();
+    ctx.strokeStyle='#fff'; ctx.lineWidth=sel?2:1; ctx.stroke();
+    ctx.fillStyle='#06121f'; ctx.font='bold 9px system-ui'; ctx.textAlign='center';
+    ctx.fillText(i+1,x,y+3);
+  });
+}
+
+function drawXoverCanvas(){
+  const p=prepCanvas('cvXover'); if(!p) return;
+  const {ctx,w,h}=p, gx=36, gy=14, gw=w-48, gh=h-36, midY=gy+gh/2;
+  drawFreqGrid(ctx,w,h,gx,gy,gw,gh,24);
+
+  const list = xoOverlay ? [0,1,2,3] : [curXoOut];
+  list.forEach(oi=>{
+    ctx.strokeStyle=OUT_COLORS[oi]; ctx.lineWidth=(oi===curXoOut)?2.8:1.6;
+    ctx.beginPath();
+    for(let i=0;i<=120;i++){
+      const f=Math.pow(10,LOG_MIN+(i/120)*LOG_SPAN);
+      const db=Math.max(-36,Math.min(24,channelMagDb(oi+2,f)));
+      const x=gx+(i/120)*gw, y=Math.max(gy,Math.min(gy+gh,midY-(db/24)*(gh/2)));
+      if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+  });
+
+  // HPF & LPF Draggable Handles on active output
+  const o=st.out[curXoOut];
+  [['hpf','#24e07c','HPF'],['lpf','#ff3b57','LPF']].forEach(([k,col,lbl])=>{
+    if(!o[k].en) return;
+    const x=freqToX(o[k].freq,gx,gw);
+    ctx.strokeStyle=col; ctx.setLineDash([4,3]); ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.moveTo(x,gy); ctx.lineTo(x,gy+gh); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle=col; ctx.beginPath(); ctx.arc(x,midY,8,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#000'; ctx.font='bold 9px system-ui'; ctx.textAlign='center'; ctx.fillText(lbl,x,gy+12);
+  });
+}
+
+function drawCompCanvas(){
+  const p=prepCanvas('cvComp'); if(!p) return;
+  const {ctx,w,h}=p; ctx.fillStyle='#070c17'; ctx.fillRect(0,0,w,h);
+  const s=Math.min(w-90,h-36), gx=34, gy=14;
+  ctx.strokeStyle='#1d2e4d'; ctx.strokeRect(gx,gy,s,s);
+  ctx.setLineDash([4,4]); ctx.beginPath(); ctx.moveTo(gx,gy+s); ctx.lineTo(gx+s,gy); ctx.stroke(); ctx.setLineDash([]);
+
+  const isIn=curCompCh<2;
+  const evalY=(xDb)=>{
+    let y=xDb;
+    if(isIn){
+      const c=st.in[curCompCh].comp;
+      if(c.en){
+        const ov=xDb-c.thr, hk=c.knee/2;
+        if(c.knee>0.05 && Math.abs(ov)<=hk) y+=((1/c.ratio)-1)*Math.pow(ov+hk,2)/(2*c.knee);
+        else if(ov>hk) y=c.thr+ov/c.ratio;
+        y+=c.makeup;
+      }
+    }else{
+      const l=st.out[curCompCh-2].lim;
+      if(l.en && y>l.thr) y=l.thr;
+    }
+    return Math.max(-60,Math.min(0,y));
+  };
+
+  ctx.strokeStyle='#38e8ff'; ctx.lineWidth=2.5; ctx.beginPath();
+  for(let i=0;i<=60;i++){
+    const xDb=-60+i, yDb=evalY(xDb);
+    const px=gx+(i/60)*s, py=gy+s-((yDb+60)/60)*s;
+    if(i===0)ctx.moveTo(px,py); else ctx.lineTo(px,py);
+  }
+  ctx.stroke();
+
+  // Live signal dot
+  const lv=Math.max(-60,Math.min(0,tel.vu[curCompCh]??-60)), ly=evalY(lv);
+  ctx.fillStyle='#ffb830'; ctx.beginPath();
+  ctx.arc(gx+((lv+60)/60)*s, gy+s-((ly+60)/60)*s, 5.5, 0, Math.PI*2); ctx.fill();
+
+  // GR Vertical Bar
+  const grX=gx+s+22, grW=26, grDb=Math.min(0, tel.gr[curCompCh]||0);
+  ctx.fillStyle='#101a2e'; ctx.fillRect(grX,gy,grW,s); ctx.strokeStyle='#243658'; ctx.strokeRect(grX,gy,grW,s);
+  const grH=Math.min(1,-grDb/24)*(s-4);
+  ctx.fillStyle='#ffb830'; ctx.fillRect(grX+2,gy+2,grW-4,grH);
+  ctx.fillStyle='#ffb830'; ctx.font='bold 11px system-ui'; ctx.textAlign='center';
+  ctx.fillText(`GR ${grDb.toFixed(1)}`, grX+grW/2, gy+s+15);
+  ctx.fillStyle='#6f88b0'; ctx.font='10px system-ui';
+  ctx.fillText('Input dBFS (-60 → 0)', gx+s/2, gy+s+15);
+}
+
+function drawGateCanvas(){
+  const p=prepCanvas('cvGate'); if(!p) return;
+  const {ctx,w,h}=p; ctx.fillStyle='#070c17'; ctx.fillRect(0,0,w,h);
+  const s=Math.min(w-60,h-36), gx=38, gy=14;
+  ctx.strokeStyle='#1d2e4d'; ctx.strokeRect(gx,gy,s,s);
+  ctx.setLineDash([4,4]); ctx.beginPath(); ctx.moveTo(gx,gy+s); ctx.lineTo(gx+s,gy); ctx.stroke(); ctx.setLineDash([]);
+
+  const g=getGateObj(curGateCh);
+  const closed=(tel.gate&(1<<curGateCh))!==0;
+  const badge=document.getElementById('gateStatusBadge');
+  badge.textContent=g.en?(closed?'GATE CLOSED':'GATE OPEN'):'BYPASSED';
+  badge.style.color=g.en?(closed?'#ff3b57':'#24e07c'):'#8ba0c4';
+
+  ctx.strokeStyle='#24e07c'; ctx.lineWidth=2.5; ctx.beginPath();
+  for(let i=0;i<=90;i++){
+    const xDb=-90+i, yDb=(g.en && xDb<g.thr)?-90:xDb;
+    const px=gx+(i/90)*s, py=gy+s-((yDb+90)/90)*s;
+    if(i===0)ctx.moveTo(px,py); else ctx.lineTo(px,py);
+  }
+  ctx.stroke();
+
+  const lv=Math.max(-90,Math.min(0,tel.vu[curGateCh]??-90));
+  const ly=(g.en && lv<g.thr)?-90:lv;
+  ctx.fillStyle=closed?'#ff3b57':'#38e8ff';
+  ctx.beginPath(); ctx.arc(gx+((lv+90)/90)*s, gy+s-((ly+90)/90)*s, 5.5, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle='#6f88b0'; ctx.font='10px system-ui'; ctx.textAlign='center';
+  ctx.fillText(`Threshold: ${g.thr} dB (-90 → 0 dBFS)`, gx+s/2, gy+s+15);
+}
+
+function drawRtaCanvas(){
+  const p=prepCanvas('cvRta'); if(!p) return;
+  const {ctx,w,h}=p; ctx.fillStyle='#070c17'; ctx.fillRect(0,0,w,h);
+  const gx=34, gy=14, gw=w-44, gh=h-38;
+
+  ctx.font='10px system-ui'; ctx.textAlign='right';
+  [0,-12,-24,-36,-48,-60,-72].forEach(db=>{
+    const y=gy+gh-((db+80)/80)*gh;
+    ctx.strokeStyle='#182642'; ctx.beginPath(); ctx.moveTo(gx,y); ctx.lineTo(gx+gw,y); ctx.stroke();
+    ctx.fillStyle='#6f88b0'; ctx.fillText(db, gx-5, y+3);
+  });
+
+  const step=gw/32, bw=Math.max(3,step-3);
+  for(let i=0;i<32;i++){
+    const db=rtaDisp[i], norm=Math.max(0,Math.min(1,(db+80)/80)), bh=norm*gh;
+    const x=gx+i*step+1.5;
+    const grad=ctx.createLinearGradient(0,gy+gh,0,gy);
+    grad.addColorStop(0,'#0ea5e9'); grad.addColorStop(0.65,'#24e07c'); grad.addColorStop(0.85,'#ffb830'); grad.addColorStop(1,'#ff3b57');
+    ctx.fillStyle=grad; ctx.fillRect(x, gy+gh-bh, bw, bh);
+
+    // Peak cap
+    const pkN=Math.max(0,Math.min(1,(rtaPeaks[i]+80)/80));
+    ctx.fillStyle='#fff'; ctx.fillRect(x, gy+gh-pkN*gh-2, bw, 2);
+
+    if(i%4===0 || i===30){
+      const f=ISO_32[i];
+      ctx.fillStyle='#8ba0c4'; ctx.textAlign='center'; ctx.font='9px system-ui';
+      ctx.fillText(f>=1000?(f/1000)+'k':f, x+bw/2, gy+gh+14);
+    }
+  }
+}
+
+function animLoop(ts){
+  updateOfflineSimulation(ts*0.001);
+  if(!rtaPaused && Array.isArray(tel.rta)){
+    for(let i=0;i<32;i++){
+      const v=tel.rta[i]??-96;
+      rtaDisp[i] = v>rtaDisp[i] ? (rtaDisp[i]*0.3+v*0.7) : (rtaDisp[i]*0.82+v*0.18);
+      if(rtaDisp[i]>rtaPeaks[i]) rtaPeaks[i]=rtaDisp[i]; else rtaPeaks[i]=Math.max(-96,rtaPeaks[i]-0.18);
+    }
+  }
+  const activeTab = document.querySelector('.tab-pane.active')?.id;
+  if(activeTab==='tab-home')  drawVuCanvas(ts);
+  if(activeTab==='tab-xover') drawXoverCanvas();
+  if(activeTab==='tab-peq')   drawPeqCanvas();
+  if(activeTab==='tab-comp')  drawCompCanvas();
+  if(activeTab==='tab-gate')  drawGateCanvas();
+  if(activeTab==='tab-rta')   drawRtaCanvas();
+  requestAnimationFrame(animLoop);
+}
+
+// ============================================================================
+// 9. TAB SWITCHING & STARTUP AUTO-DETECT
+// ============================================================================
+function activateTab(id){
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active',b.dataset.tab===id));
+  document.querySelectorAll('.tab-pane').forEach(p=>p.classList.toggle('active',p.id==='tab-'+id));
+}
+document.querySelectorAll('.tab-btn').forEach(b=>b.onclick=()=>activateTab(b.dataset.tab));
+
+window.addEventListener('DOMContentLoaded',()=>{
+  syncAllUI();
+  setupCanvasInteraction();
+  requestAnimationFrame(animLoop);
+
+  // Deteksi otomatis jika dibuka melalui WiFi AP AU-WEB (http://192.168.4.1)
+  if(location.protocol.startsWith('http') && location.hostname && location.hostname!=='localhost' && location.hostname!=='127.0.0.1'){
+    document.getElementById('btnSplashWs').style.display='block';
+    connectWS();
+  }
+});
+</script>
+</body>
+</html>
