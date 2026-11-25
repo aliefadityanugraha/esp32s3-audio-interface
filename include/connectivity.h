@@ -76,8 +76,7 @@ public:
   // Dipanggil berkala dari task Core 0: sync mode radio dari UI, proses HTTP/WS/BLE,
   // serta kirim stream telemetri otomatis tiap 50-100 ms saat klien terhubung.
   void update(const audio_io::AudioTelemetry &audioTel,
-              const dsp::DspMeters &dspMet,
-              const dsp::RtaSpectrumData &rtaData);
+              const dsp::DspMeters &dspMet);
 
   // Transisi mode radio secara eksplisit & aman
   void setRadioMode(RadioMode newMode);
@@ -87,9 +86,10 @@ public:
   RadioConfig getRadioConfig() const { return radioCfg_; }
   void setBleCredentials(const char *name, uint32_t pin6Digits);
 
-  // Status klien terhubung
+  // Status klien terhubung & status aktif tulis OTA Flash
   bool isBleClientConnected() const { return bleConnected_; }
   bool isWsClientConnected() const { return wsClientCount_ > 0; }
+  bool isOtaFlashing() const { return otaFlashing_; }
 
   // Callback internal dari BLE & WebSocket (dipanggil dari class callback friend/static)
   void onBleConnect();
@@ -158,9 +158,13 @@ private:
   WebSocketsServer *wsServer_      = nullptr;
   uint8_t           wsClientCount_ = 0;
 
-  // State Upload Logo pada halaman AU-OTA
-  File otaLogoFile_;
-  char otaLogoFinalPath_[32] = {0};
+  // State Upload OTA Firmware / Logo / WebApp pada halaman AU-OTA
+  File          otaLogoFile_;
+  char          otaLogoFinalPath_[32] = {0};
+  volatile bool otaFlashing_          = false;
+  bool          otaFwFinishedOk_      = false;
+  uint32_t      otaLastYieldMs_       = 0;
+  uint32_t      otaLastLogBytes_      = 0;
 
   // Telemetry Stream Timer
   uint32_t lastTelemMs_  = 0;

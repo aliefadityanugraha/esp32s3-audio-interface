@@ -10,14 +10,50 @@
 #include <cmath>
 #include <cstring>
 
+#include "USB.h"
+#include "USBAudioCard.h"
 #include "driver/gpio.h"
 #include "esp_rom_gpio.h"
 #include "esp_timer.h"
 #include "soc/gpio_sig_map.h"
+#include "tusb.h"
 
 namespace audio_io {
 
 namespace {
+
+// Native Arduino-ESP32 USBAudioCard (menggunakan driver built-in TinyUSB audio_device.c)
+// 48 kHz, 16-bit, Stereo Speaker (PC -> ESP32) + Stereo Mic (ESP32 -> PC)
+USBAudioCard gUsbAudio(AUDIO_SAMPLE_RATE, UAC_BPS_16, UAC_SPK_STEREO, UAC_MIC_STEREO);
+AudioIO *gAudioIoInstance = nullptr;
+
+// Callback data masuk dari PC (dipanggil oleh _uacReceiveTask setiap ~2 ms)
+void usbSpkDataCallback(void *data, uint16_t len) {
+  if (!data || len < 4 || !gAudioIoInstance) return;
+  // Terapkan volume & mute slider dari Windows / macOS
+  gUsbAudio.applyVolume(data, len);
+  gAudioIoInstance->onUsbRxData(reinterpret_cast<const int16_t *>(data), len / 4);
+}
+
+// Callback event koneksi USB & aktivasi interface SPK / MIC dari PC
+void usbAudioEventCallback(void *arg, esp_event_base_t eventBase, int32_t eventId, void *eventData) {
+  (void)arg;
+  if (!gAudioIoInstance) return;
+
+  if (eventBase == ARDUINO_USB_EVENTS) {
+    if (eventId == ARDUINO_USB_STARTED_EVENT || eventId == ARDUINO_USB_RESUME_EVENT) {
+      gAudioIoInstance->onUsbLinkChanged(true);
+    } else if (eventId == ARDUINO_USB_STOPPED_EVENT || eventId == ARDUINO_USB_SUSPEND_EVENT) {
+      gAudioIoInstance->onUsbLinkChanged(false);
+    }
+  } else if (eventBase == ARDUINO_USB_AUDIO_CARD_EVENTS && eventData != nullptr) {
+    const auto *d = static_cast<const arduino_usb_audio_card_event_data_t *>(eventData);
+    if (eventId == ARDUINO_USB_AUDIO_CARD_INTERFACE_ENABLE_EVENT) {
+      gAudioIoInstance->onUsbInterfaceEnable(d->interface_enable.interface == UAC_INTERFACE_MIC,
+                                             d->interface_enable.enable);
+    }
+  }
+}
 
 constexpr float INV_INT16_MAX   = 1.0f / 32768.0f;
 constexpr float INT16_SCALE     = 32767.0f;
@@ -29,6 +65,7 @@ constexpr float BLOCK_DURATION_US =
     static_cast<float>(AUDIO_SAMPLE_RATE);
 
 inline float clampAudio(float v) {
+  if (!std::isfinite(v)) return 0.0f;
   if (v > 1.0f) return 1.0f;
   if (v < -1.0f) return -1.0f;
   return v;
@@ -40,27 +77,34 @@ inline int16_t floatToInt16(float v) {
 }
 
 inline int32_t floatToInt32(float v) {
-  // 24-bit signed left-aligned ke slot 32-bit I2S via single-precision HW FPU (0 software double)
+  // 24-bit signed left-aligned ke slot 32-bit I2S tanpa signed-shift UB
   constexpr float SCALE_24 = 8388607.0f;
   const int32_t s24 = static_cast<int32_t>(clampAudio(v) * SCALE_24);
-  return s24 << 8;
+  return static_cast<int32_t>(static_cast<uint32_t>(s24) << 8);
 }
 
 } // namespace
 
 // ============================================================================
-// 1. IMPLEMENTASI ADAPTIVE RING BUFFER (DRIFT COMPENSATION + INTERPOLASI)
+// 1. IMPLEMENTASI ADAPTIVE RING BUFFER (THREAD-SAFE CROSS-CORE + DRIFT GUARD)
 // ============================================================================
 void AdaptiveRingBuffer::reset() {
+  portENTER_CRITICAL(&rbMux_);
   head_ = 0;
   tail_ = 0;
   count_ = 0;
   primed_ = false;
+  needFadeIn_ = false;
+  wasPrimed_ = false;
+  driftCooldown_ = 0;
   lastL_ = 0;
   lastR_ = 0;
+  portEXIT_CRITICAL(&rbMux_);
 }
 
 void AdaptiveRingBuffer::pushStereo16(const int16_t *interleavedSrc, size_t frames) {
+  if (!interleavedSrc || frames == 0) return;
+  portENTER_CRITICAL(&rbMux_);
   for (size_t i = 0; i < frames; i++) {
     if (count_ >= CAPACITY) {
       // Buffer penuh (overrun): buang frame tertua agar pointer tetap konsisten
@@ -73,110 +117,183 @@ void AdaptiveRingBuffer::pushStereo16(const int16_t *interleavedSrc, size_t fram
     head_ = (head_ + 1) & MASK;
     count_++;
   }
+  portEXIT_CRITICAL(&rbMux_);
 }
 
 bool AdaptiveRingBuffer::popBlockFloat(float *outL, float *outR, size_t frames) {
-  // Priming: tunggu hingga terisi minimal AUDIO_RB_TARGET_FILL (~8 ms) sebelum mulai bunyi
+  int16_t tmpL[AUDIO_BLOCK_FRAMES];
+  int16_t tmpR[AUDIO_BLOCK_FRAMES];
+  bool valid = false;
+  bool doFadeIn = false;
+  bool doFadeOut = false;
+  int16_t fadeStartL = 0;
+  int16_t fadeStartR = 0;
+
+  portENTER_CRITICAL(&rbMux_);
+  // Priming: tunggu hingga terisi minimal AUDIO_RB_TARGET_FILL (~10.67 ms) sebelum mulai bunyi
   if (!primed_) {
     if (count_ >= AUDIO_RB_TARGET_FILL) {
       primed_ = true;
-    } else {
-      memset(outL, 0, frames * sizeof(float));
-      memset(outR, 0, frames * sizeof(float));
-      return false;
+      needFadeIn_ = true;
+      driftCooldown_ = 0;
     }
   }
 
-  // Deteksi underrun: butuh sedikit margin (+2 frame) untuk koreksi drift
-  if (count_ < frames + 2) {
-    primed_ = false;
-    underrunCount_++;
+  if (primed_) {
+    if (count_ < frames + 2) {
+      primed_ = false;
+      underrunCount_++;
+      if (wasPrimed_) {
+        doFadeOut = true;
+        fadeStartL = lastL_;
+        fadeStartR = lastR_;
+        wasPrimed_ = false;
+      }
+      lastL_ = 0;
+      lastR_ = 0;
+    } else {
+      // Koreksi clock-drift halus antara USB Host (PC) vs I2S Master (ESP32-S3):
+      // Rate-limit maksimal 1 sampel per 8 blok (~0.1% pitch -> tak terdengar telinga),
+      // kecuali jika buffer sudah sangat jauh dari target (>1024 atau <192).
+      int adj = 0;
+      const bool extremeHigh = (count_ > (AUDIO_RB_TARGET_FILL * 2));
+      const bool extremeLow  = (count_ < (frames + 64));
+      if (driftCooldown_ > 0) {
+        driftCooldown_--;
+      }
+      if (count_ > (AUDIO_RB_TARGET_FILL + AUDIO_RB_TOLERANCE)) {
+        if (extremeHigh || driftCooldown_ == 0) {
+          adj = 1;
+          driftDropCount_++;
+          driftCooldown_ = extremeHigh ? 1 : 8;
+        }
+      } else if (count_ < (AUDIO_RB_TARGET_FILL - AUDIO_RB_TOLERANCE)) {
+        if (extremeLow || driftCooldown_ == 0) {
+          adj = -1;
+          driftInsertCount_++;
+          driftCooldown_ = extremeLow ? 1 : 8;
+        }
+      }
+
+      for (size_t i = 0; i < frames; i++) {
+        int16_t curL = 0;
+        int16_t curR = 0;
+        if (i == 0 && adj == 1) {
+          int16_t aL = 0, aR = 0, bL = 0, bR = 0;
+          popOne(aL, aR);
+          popOne(bL, bR);
+          curL = static_cast<int16_t>((static_cast<int32_t>(aL) + static_cast<int32_t>(bL)) >> 1);
+          curR = static_cast<int16_t>((static_cast<int32_t>(aR) + static_cast<int32_t>(bR)) >> 1);
+          lastL_ = bL;
+          lastR_ = bR;
+        } else if (i == 0 && adj == -1) {
+          int16_t nextL = 0, nextR = 0;
+          peekOne(nextL, nextR);
+          curL = static_cast<int16_t>((static_cast<int32_t>(lastL_) + static_cast<int32_t>(nextL)) >> 1);
+          curR = static_cast<int16_t>((static_cast<int32_t>(lastR_) + static_cast<int32_t>(nextR)) >> 1);
+        } else {
+          popOne(curL, curR);
+          lastL_ = curL;
+          lastR_ = curR;
+        }
+        tmpL[i] = curL;
+        tmpR[i] = curR;
+      }
+      valid = true;
+      wasPrimed_ = true;
+      doFadeIn = needFadeIn_;
+      needFadeIn_ = false;
+    }
+  }
+  portEXIT_CRITICAL(&rbMux_);
+
+  if (!valid) {
     memset(outL, 0, frames * sizeof(float));
     memset(outR, 0, frames * sizeof(float));
+    if (doFadeOut) {
+      // Smooth fade-out 64 sampel (~1.33 ms) agar underrun / stop USB tidak pernah "POP"
+      constexpr size_t FADE_N = 64;
+      const size_t n = (frames < FADE_N) ? frames : FADE_N;
+      const float sL = static_cast<float>(fadeStartL) * INV_INT16_MAX;
+      const float sR = static_cast<float>(fadeStartR) * INV_INT16_MAX;
+      for (size_t i = 0; i < n; i++) {
+        const float w = 1.0f - (static_cast<float>(i + 1) / static_cast<float>(n));
+        outL[i] = sL * w;
+        outR[i] = sR * w;
+      }
+    }
     return false;
   }
 
-  // Hitung koreksi clock-drift antara USB Host (PC) vs I2S Master (ESP32-S3):
-  //   adj = +1 : PC sedikit lebih cepat -> lebur 2 frame menjadi 1 (drop 1 frame halus)
-  //   adj = -1 : PC sedikit lebih lambat -> sisipkan 1 frame interpolasi linear
-  int adj = 0;
-  if (count_ > (AUDIO_RB_TARGET_FILL + AUDIO_RB_TOLERANCE)) {
-    adj = 1;
-    driftDropCount_++;
-  } else if (count_ < (AUDIO_RB_TARGET_FILL - AUDIO_RB_TOLERANCE)) {
-    adj = -1;
-    driftInsertCount_++;
-  }
-
   for (size_t i = 0; i < frames; i++) {
-    int16_t curL = 0;
-    int16_t curR = 0;
-
-    if (i == 0 && adj == 1) {
-      // Drop 1 frame dengan rata-rata 2 frame bersebelahan untuk meminimalkan klik
-      int16_t aL = 0, aR = 0;
-      int16_t bL = 0, bR = 0;
-      popOne(aL, aR);
-      popOne(bL, bR);
-      curL = static_cast<int16_t>((static_cast<int32_t>(aL) + static_cast<int32_t>(bL)) >> 1);
-      curR = static_cast<int16_t>((static_cast<int32_t>(aR) + static_cast<int32_t>(bR)) >> 1);
-      lastL_ = bL;
-      lastR_ = bR;
-    } else if (i == 0 && adj == -1) {
-      // Sisipkan 1 frame hasil interpolasi linear antara sampel terakhir dan sampel berikutnya
-      int16_t nextL = 0, nextR = 0;
-      peekOne(nextL, nextR);
-      curL = static_cast<int16_t>((static_cast<int32_t>(lastL_) + static_cast<int32_t>(nextL)) >> 1);
-      curR = static_cast<int16_t>((static_cast<int32_t>(lastR_) + static_cast<int32_t>(nextR)) >> 1);
-    } else {
-      popOne(curL, curR);
-      lastL_ = curL;
-      lastR_ = curR;
+    float g = 1.0f;
+    if (doFadeIn && i < 64) {
+      g = static_cast<float>(i + 1) / 64.0f;
     }
-
-    outL[i] = static_cast<float>(curL) * INV_INT16_MAX;
-    outR[i] = static_cast<float>(curR) * INV_INT16_MAX;
+    outL[i] = static_cast<float>(tmpL[i]) * INV_INT16_MAX * g;
+    outR[i] = static_cast<float>(tmpR[i]) * INV_INT16_MAX * g;
   }
-
   return true;
 }
 
 // ============================================================================
-// 2. INISIALISASI USB AUDIO UAC2 (48 kHz, 16-bit, Stereo Full-Duplex)
+// 2. INISIALISASI USB AUDIO NATIVE (USBAudioCard 48 kHz 16-bit Stereo 2x2)
 // ============================================================================
 bool AudioIO::beginUSB(const char *manufacturer, const char *product) {
-  audio_tools::AudioInfo info(AUDIO_SAMPLE_RATE, AUDIO_USB_CHANNELS, AUDIO_USB_BIT_DEPTH);
-  auto cfg = usbAudio_.defaultConfig(audio_tools::RXTX_MODE);
-  cfg.copyFrom(info);
-  cfg.manufacturer = manufacturer;
-  cfg.product      = product;
-  cfg.begin_usb    = true;
-
-  usbInitialized_ = usbAudio_.begin(cfg);
+  gAudioIoInstance = this;
   usbRxRb_.reset();
+
+  gUsbAudio.onEvent(usbAudioEventCallback);
+  gUsbAudio.onData(usbSpkDataCallback);
+  const bool cardOk = gUsbAudio.begin();
+
+  USB.manufacturerName(manufacturer);
+  USB.productName(product);
+  USB.onEvent(usbAudioEventCallback);
+  const bool usbOk = USB.begin();
+
+  usbInitialized_ = (cardOk && usbOk);
   return usbInitialized_;
+}
+
+void AudioIO::onUsbRxData(const int16_t *interleavedSrc, size_t frames) {
+  usbRxRb_.pushStereo16(interleavedSrc, frames);
+}
+
+void AudioIO::onUsbLinkChanged(bool mounted) {
+  usbMounted_ = mounted;
+  if (!mounted) {
+    usbRxStreamActive_ = false;
+    usbTxStreamActive_ = false;
+    usbRxRb_.reset();
+  }
+}
+
+void AudioIO::onUsbInterfaceEnable(bool isMic, bool enabled) {
+  if (isMic) {
+    usbTxStreamActive_ = enabled;
+  } else {
+    usbRxStreamActive_ = enabled;
+    if (!enabled) {
+      usbRxRb_.reset();
+    }
+  }
 }
 
 // ============================================================================
 // 3. KONFIGURASI GPIO MATRIX: SHARED BCLK (4) & LRCK (5) UNTUK I2S0 & I2S1
 // ============================================================================
 void AudioIO::configureSharedClockMatrix() {
-  // Jadikan BCLK (GPIO 4) dan LRCK (GPIO 5) sebagai INPUT_OUTPUT:
-  // - Driver output mengirim sinyal clock dari I2S0 Master keluar ke PCM1808, DAC1, DAC2
-  // - Buffer input membaca balik pad yang sama secara internal menuju I2S1 Slave TX
-  gpio_config_t ioConf = {};
-  ioConf.pin_bit_mask = (1ULL << PIN_I2S_BCLK) | (1ULL << PIN_I2S_LRCK);
-  ioConf.mode         = GPIO_MODE_INPUT_OUTPUT;
-  ioConf.pull_up_en   = GPIO_PULLUP_DISABLE;
-  ioConf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-  ioConf.intr_type    = GPIO_INTR_DISABLE;
-  gpio_config(&ioConf);
+  // JANGAN memanggil gpio_config() ulang setelah i2s_channel_init_std_mode(),
+  // karena dapat mereset mux output I2S0 full-duplex!
+  // Cukup aktifkan buffer input pad pada BCLK & LRCK lalu hubungkan loopback
+  // internal ke I2S1 Slave TX agar I2S0 Master + I2S1 Slave 100% sinkron fase.
+  gpio_input_enable(PIN_I2S_BCLK);
+  gpio_input_enable(PIN_I2S_LRCK);
 
-  // Sambungkan Output Clock I2S0 Master -> Pin Fisik BCLK & LRCK
   esp_rom_gpio_connect_out_signal(PIN_I2S_BCLK, I2S0O_BCK_OUT_IDX, false, false);
   esp_rom_gpio_connect_out_signal(PIN_I2S_LRCK, I2S0O_WS_OUT_IDX,  false, false);
 
-  // Sambungkan Pin Fisik BCLK & LRCK -> Input Clock I2S1 Slave TX (Loopback Internal)
   esp_rom_gpio_connect_in_signal(PIN_I2S_BCLK, I2S1O_BCK_IN_IDX, false);
   esp_rom_gpio_connect_in_signal(PIN_I2S_LRCK, I2S1O_WS_IN_IDX,  false);
 
@@ -266,8 +383,11 @@ bool AudioIO::beginI2S() {
   memset(i2sTx0Buf_, 0, sizeof(i2sTx0Buf_));
   memset(i2sTx1Buf_, 0, sizeof(i2sTx1Buf_));
   size_t loadedBytes = 0;
-  i2s_channel_preload_data(i2s1TxHandle_, i2sTx1Buf_, sizeof(i2sTx1Buf_), &loadedBytes);
-  i2s_channel_preload_data(i2s0TxHandle_, i2sTx0Buf_, sizeof(i2sTx0Buf_), &loadedBytes);
+  // Preload 4 DMA buffer (~10.67 ms headroom) agar kedua DAC tidak underrun saat startup
+  for (int p = 0; p < 4; p++) {
+    i2s_channel_preload_data(i2s1TxHandle_, i2sTx1Buf_, sizeof(i2sTx1Buf_), &loadedBytes);
+    i2s_channel_preload_data(i2s0TxHandle_, i2sTx0Buf_, sizeof(i2sTx0Buf_), &loadedBytes);
+  }
 
   if (i2s_channel_enable(i2s1TxHandle_) != ESP_OK) return false;
   if (i2s_channel_enable(i2s0RxHandle_) != ESP_OK) return false;
@@ -362,8 +482,11 @@ bool AudioIO::resyncI2S() {
   memset(i2sTx0Buf_, 0, sizeof(i2sTx0Buf_));
   memset(i2sTx1Buf_, 0, sizeof(i2sTx1Buf_));
   size_t loadedBytes = 0;
-  i2s_channel_preload_data(i2s1TxHandle_, i2sTx1Buf_, sizeof(i2sTx1Buf_), &loadedBytes);
-  i2s_channel_preload_data(i2s0TxHandle_, i2sTx0Buf_, sizeof(i2sTx0Buf_), &loadedBytes);
+  // Preload 4 DMA buffer (~10.67 ms headroom) agar kedua DAC tidak underrun saat startup
+  for (int p = 0; p < 4; p++) {
+    i2s_channel_preload_data(i2s1TxHandle_, i2sTx1Buf_, sizeof(i2sTx1Buf_), &loadedBytes);
+    i2s_channel_preload_data(i2s0TxHandle_, i2sTx0Buf_, sizeof(i2sTx0Buf_), &loadedBytes);
+  }
 
   if (i2s_channel_enable(i2s1TxHandle_) != ESP_OK) return false;
   if (i2s_channel_enable(i2s0RxHandle_) != ESP_OK) return false;
@@ -477,34 +600,7 @@ void AudioIO::setMasterGain(float linearGain) {
 }
 
 // ============================================================================
-// 7. KURAS DATA USB UAC2 (PC -> ESP32) KE ADAPTIVE RING BUFFER
-// ============================================================================
-void AudioIO::drainUsbToRingBuffer() {
-  if (!usbInitialized_) return;
-
-  if (usbAudio_.mounted()) {
-    int avail = 0;
-    while ((avail = usbAudio_.available()) >= 4) {
-      size_t toRead = static_cast<size_t>(avail);
-      if (toRead > sizeof(usbRxRaw_)) {
-        toRead = sizeof(usbRxRaw_);
-      }
-      toRead -= (toRead % 4); // Kelipatan 4 byte (1 frame stereo 16-bit)
-      if (toRead == 0) break;
-
-      size_t got = usbAudio_.readBytes(reinterpret_cast<uint8_t *>(usbRxRaw_), toRead);
-      got -= (got % 4);
-      if (got == 0) break;
-
-      usbRxRb_.pushStereo16(usbRxRaw_, got / 4);
-    }
-  } else {
-    usbRxRb_.reset();
-  }
-}
-
-// ============================================================================
-// 8. ROUTING BAWAAN TAHAP 1 (PASSTHROUGH / VERIFIKASI 2-IN 4-OUT)
+// 7. ROUTING BAWAAN TAHAP 1 (PASSTHROUGH / VERIFIKASI 2-IN 4-OUT)
 // ============================================================================
 void AudioIO::runDefaultRouting(AudioBlock &block) {
   const DefaultRoutingMode mode = defaultRouting_;
@@ -566,10 +662,7 @@ void AudioIO::processOneBlock() {
     return;
   }
 
-  // ---- 1. Kuras paket USB masuk ke Adaptive Ring Buffer ----
-  drainUsbToRingBuffer();
-
-  // ---- 2. Baca 128 frame dari ADC PCM1808 (Metronom Hardware 2.667 ms) ----
+  // ---- 1. Baca 128 frame dari ADC PCM1808 (Metronom Hardware 2.667 ms) ----
   size_t bytesRead = 0;
   esp_err_t rxErr = ESP_OK;
 
@@ -659,25 +752,29 @@ void AudioIO::processOneBlock() {
     float a3 = fabsf(d3); if (a3 > pkDac[3]) pkDac[3] = a3;
   }
 
-  // ---- 7. Kirim ke Endpoint USB UAC2 TX (ESP32 -> PC) ----
-  const bool mounted = usbInitialized_ && usbAudio_.mounted();
-  if (mounted) {
-    usbAudio_.write(reinterpret_cast<const uint8_t *>(usbTxRaw_), sizeof(usbTxRaw_));
+  // ---- 7. Kirim ke Endpoint USB Audio TX (ESP32 -> PC) secara NON-BLOCKING ----
+  // tud_audio_write() menulis ke SW FIFO TinyUSB secara non-blocking sehingga
+  // tidak pernah menahan loop real-time Core 1.
+  const bool mounted = usbInitialized_ && (usbMounted_ || tud_mounted());
+  if (mounted && usbTxStreamActive_) {
+    gUsbAudio.write(usbTxRaw_, static_cast<uint16_t>(sizeof(usbTxRaw_)));
   }
 
-  // ---- 8. Tulis Serempak ke DMA DAC2 (I2S1 Slave) & DAC1 (I2S0 Master) ----
-  // Kedua DMA mengonsumsi tepat 128 frame per 128 frame BCLK/LRCK bersama -> 0 drift!
+  // ---- 8. Tulis ke DMA DAC1 (I2S0 Master) lalu DAC2 (I2S1 Slave) ----
+  // Tulis Master DAC1 terlebih dahulu; batasi timeout Slave DAC2 agar tidak pernah
+  // memblokir loop 2.67 ms bila terjadi glitch clock.
   size_t wBytes1 = 0;
   size_t wBytes0 = 0;
   esp_err_t tx1Err = ESP_OK;
   esp_err_t tx0Err = ESP_OK;
 
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
-  tx1Err = i2s_channel_write(i2s1TxHandle_, i2sTx1Buf_, sizeof(i2sTx1Buf_), &wBytes1, 10);
-  tx0Err = i2s_channel_write(i2s0TxHandle_, i2sTx0Buf_, sizeof(i2sTx0Buf_), &wBytes0, 10);
+  // Timeout 8 ms (> 3x periode blok 2.667 ms) agar DAC2 Slave tidak pernah drop frame prematur
+  tx0Err = i2s_channel_write(i2s0TxHandle_, i2sTx0Buf_, sizeof(i2sTx0Buf_), &wBytes0, 8);
+  tx1Err = i2s_channel_write(i2s1TxHandle_, i2sTx1Buf_, sizeof(i2sTx1Buf_), &wBytes1, 8);
 #else
-  tx1Err = i2s_write(I2S_NUM_1, i2sTx1Buf_, sizeof(i2sTx1Buf_), &wBytes1, pdMS_TO_TICKS(10));
-  tx0Err = i2s_write(I2S_NUM_0, i2sTx0Buf_, sizeof(i2sTx0Buf_), &wBytes0, pdMS_TO_TICKS(10));
+  tx0Err = i2s_write(I2S_NUM_0, i2sTx0Buf_, sizeof(i2sTx0Buf_), &wBytes0, pdMS_TO_TICKS(8));
+  tx1Err = i2s_write(I2S_NUM_1, i2sTx1Buf_, sizeof(i2sTx1Buf_), &wBytes1, pdMS_TO_TICKS(8));
 #endif
 
   // Hitung CPU Load Core 1 (%)
@@ -687,8 +784,8 @@ void AudioIO::processOneBlock() {
   // ---- 9. Update Snapshot Telemetri secara Atomic ----
   portENTER_CRITICAL(&telemetryMux_);
   telemetry_.usbMounted        = mounted;
-  telemetry_.usbRxStreaming    = mounted && (usbAudio_.isStreamingActiveRx() || block_.usbPlaybackActive);
-  telemetry_.usbTxStreaming    = mounted && usbAudio_.isStreamingActiveTx();
+  telemetry_.usbRxStreaming    = mounted && (usbRxStreamActive_ || block_.usbPlaybackActive);
+  telemetry_.usbTxStreaming    = mounted && usbTxStreamActive_;
   telemetry_.ringBufferPrimed  = block_.usbPlaybackActive;
   telemetry_.rbFillFrames      = usbRxRb_.count();
   telemetry_.rbUnderrunCount   = usbRxRb_.underruns();

@@ -16,7 +16,7 @@
 #include <driver/gpio.h>
 
 // ============================================================================
-// 1. LCD TFT ST7789 (240x320 SPI)
+// 1. LCD TFT ILI9341 (240x320 SPI)
 // ============================================================================
 constexpr gpio_num_t PIN_LCD_SCLK = GPIO_NUM_12;
 constexpr gpio_num_t PIN_LCD_MOSI = GPIO_NUM_13;

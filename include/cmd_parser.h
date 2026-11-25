@@ -5,12 +5,12 @@
  * @brief Tahap 4: Protokol Command Parser Ringan (Teks & JSON) untuk BLE NUS & WebSocket
  *
  * Perintah yang Didukung:
- *  - SET <param> <val>          : Ubah parameter Gain/PEQ/Xover/Comp/Gate/Delay/Matrix/Gen/Master
+ *  - SET <param> <val>          : Ubah parameter Input (Gain/Mute/Phase), Output (Gain/Mute/Phase/Xover/PEQ/Gate/Lim/Delay), Matrix, Master
  *  - GET <param>                : Baca nilai parameter aktif
  *  - DUMP                       : Ekspor seluruh konfigurasi aktif dalam JSON ringkas
  *  - PRESET <LOAD|SAVE|DEL> <n> : Kelola slot preset 0..7 di LittleFS (+ RENAME)
- *  - THEME <0-6>                : Pilih tema warna UI ST7789
- *  - COLORMODE <0-3>            : Pilih mode warna hardware panel ST7789
+ *  - THEME <0-6>                : Pilih tema warna UI ILI9341
+ *  - COLORMODE <0-3>            : Pilih mode warna hardware panel ILI9341
  *  - STANDBY <detik>            : Timer auto-standby (0=OFF, 5..600 detik)
  *  - COPY <src_ch> <dst_ch|ALL> : Salin pengaturan kanal (IN1/IN2/OUT1..OUT4 -> dst/ALL)
  *  - LOCK <0|1>                 : Aktifkan / nonaktifkan Panel Lock
@@ -36,9 +36,8 @@
 
 namespace conn {
 
-constexpr const char *FW_VERSION_STR   = "1.4.0-DLMS2x4";
+constexpr const char *FW_VERSION_STR   = "2.0.0-DSPAudioIF";
 constexpr size_t      MAX_LOGO_BYTES   = 160000; // 320x240 RGB565 = 153600 byte + margin
-constexpr uint8_t     RTA_STREAM_BANDS = 32;     // 32-band RTA telemetry
 
 // Bitmask Stereo Channel Linking
 enum LinkMask : uint8_t {
@@ -83,11 +82,10 @@ public:
   void     setLinkMask(uint8_t mask) { linkMask_ = (mask & LINK_ALL); }
   uint16_t getTelemetryIntervalMs() const { return telemIntervalMs_; }
 
-  // Bangun paket JSON Telemetri live (6-ch VU, RMS, GR, Clip, Limiter, 32-band RTA)
+  // Bangun paket JSON Telemetri live (6-ch VU, RMS, Output GR, Clip, Limiter, Gate)
   size_t buildTelemetryJson(char *outBuf, size_t outSize,
                             const audio_io::AudioTelemetry &audioTel,
-                            const dsp::DspMeters &dspMet,
-                            const dsp::RtaSpectrumData &rtaData) const;
+                            const dsp::DspMeters &dspMet) const;
 
 private:
   // Handler perintah utama

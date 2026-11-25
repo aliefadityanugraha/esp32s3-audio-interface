@@ -225,39 +225,10 @@ void test_crossover_types_and_slopes_impulse(void) {
 }
 
 // ============================================================================
-// TEST 3: SINE 1 kHz (-6 dBFS & +6 dBFS) — COMPRESSOR, NOISE GATE, PEAK LIMITER
+// TEST 3: SINE 1 kHz (-6 dBFS & +6 dBFS) — OUTPUT NOISE GATE & PEAK LIMITER
 // ============================================================================
-void test_dynamics_compressor_gate_limiter(void) {
-  // ---- A. Input Compressor: Threshold -18 dB, Ratio 4:1, Hard Knee vs Soft Knee ----
-  {
-    SystemConfig cfg = makeLinearFilterConfig();
-    cfg.inputs[0].comp = {true, -18.0f, 4.0f, 1.0f, 80.0f, 0.0f, 0.0f};
-    gDsp.applyConfig(cfg);
-    gDsp.snapAndResetStates();
-
-    auto sineNeg6 = genSine(4800, 1000.0f, -6.0f); // 100 ms @ -6 dBFS (12 dB di atas thr)
-    auto outNeg6  = runMonoAdcThroughOut(gDsp, sineNeg6, 0, 0);
-    const DspMeters mNeg6 = gDsp.getMeters();
-    // Di -6 dBFS (12 dB di atas -18 dB, ratio 4:1): GR teoritis ~ -9 dB
-    TEST_ASSERT_FLOAT_WITHIN(2.0f, -9.0f, mNeg6.inCompGrDb[0]);
-
-    // Uji +6 dBFS (24 dB di atas -18 dB, ratio 4:1): GR harus jauh lebih dalam (~ -18 dB)
-    auto sinePos6 = genSine(4800, 1000.0f, +6.0f);
-    runMonoAdcThroughOut(gDsp, sinePos6, 0, 0);
-    const DspMeters mPos6 = gDsp.getMeters();
-    TEST_ASSERT_TRUE(mPos6.inCompGrDb[0] < mNeg6.inCompGrDb[0] - 5.0f);
-
-    // Uji Soft Knee (12 dB) tepat di threshold (-18 dBFS): GR harus lembut (< -0.2 dB dan > -4 dB)
-    cfg.inputs[0].comp.kneeDb = 12.0f;
-    gDsp.applyConfig(cfg);
-    gDsp.snapAndResetStates();
-    auto sineAtThr = genSine(4800, 1000.0f, -18.0f);
-    runMonoAdcThroughOut(gDsp, sineAtThr, 0, 0);
-    const DspMeters mKnee = gDsp.getMeters();
-    TEST_ASSERT_TRUE(mKnee.inCompGrDb[0] < -0.2f && mKnee.inCompGrDb[0] > -4.0f);
-  }
-
-  // ---- B. Output Noise Gate (default -50 dB) ----
+void test_output_gate_and_peak_limiter(void) {
+  // ---- A. Output Noise Gate (default -50 dB) ----
   {
     SystemConfig cfg = makeLinearFilterConfig();
     cfg.outputs[0].gate = {true, -50.0f, 1.0f, 40.0f, 5.0f, -80.0f};
@@ -279,7 +250,7 @@ void test_dynamics_compressor_gate_limiter(void) {
     TEST_ASSERT_FLOAT_WITHIN(0.5f, -6.0f, measurePeakDb(outLoud, 2400, 4800));
   }
 
-  // ---- C. Output Peak Limiter (-1 dBFS) dengan Sine -6 dBFS & +6 dBFS ----
+  // ---- B. Output Peak Limiter (-1 dBFS) dengan Sine -6 dBFS & +6 dBFS ----
   {
     SystemConfig cfg = makeLinearFilterConfig();
     cfg.outputs[0].limiter = {true, -1.0f, 0.2f, 100.0f};
@@ -304,11 +275,11 @@ void test_dynamics_compressor_gate_limiter(void) {
 }
 
 // ============================================================================
-// TEST 4: ROUTING MATRIX DEFAULT & COPY CHANNEL SETTINGS (OUT_1 -> ALL)
+// TEST 4: CLEAN INPUT, ROUTING MATRIX (TERMASUK ISOLASI 0%), & COPY CHANNEL
 // ============================================================================
-void test_routing_matrix_and_copy_channel(void) {
-  // ---- A. Verifikasi Default Routing Matrix ----
-  // OUT 1-2: Mix IN 1-2 + USB RX; OUT 3-4: Direct/Bypass hanya dari IN 1-2
+void test_clean_input_routing_matrix_and_copy_channel(void) {
+  // ---- A. Verifikasi Default Routing Matrix + Direct USB Record ----
+  // OUT 1-2: Mix IN A/B + USB RX; OUT 3-4: Direct dari IN A/B
   SystemConfig cfg = makeLinearFilterConfig();
   gDsp.applyConfig(cfg);
   gDsp.snapAndResetStates();
@@ -317,8 +288,8 @@ void test_routing_matrix_and_copy_channel(void) {
   blk.frames = AUDIO_BLOCK_FRAMES;
   blk.usbPlaybackActive = true;
   for (size_t i = 0; i < AUDIO_BLOCK_FRAMES; i++) {
-    blk.adcIn[0][i] = 0.25f; // IN 1
-    blk.adcIn[1][i] = 0.15f; // IN 2
+    blk.adcIn[0][i] = 0.25f; // IN A
+    blk.adcIn[1][i] = 0.15f; // IN B
     blk.usbIn[0][i] = 0.40f; // USB L
     blk.usbIn[1][i] = 0.30f; // USB R
   }
@@ -327,11 +298,33 @@ void test_routing_matrix_and_copy_channel(void) {
   const size_t k = AUDIO_BLOCK_FRAMES - 1;
   TEST_ASSERT_FLOAT_WITHIN(1.0e-4f, 0.65f, blk.dacOut[0][k]); // OUT 1 = 0.25 + 0.40
   TEST_ASSERT_FLOAT_WITHIN(1.0e-4f, 0.45f, blk.dacOut[1][k]); // OUT 2 = 0.15 + 0.30
-  TEST_ASSERT_FLOAT_WITHIN(1.0e-4f, 0.25f, blk.dacOut[2][k]); // OUT 3 = 0.25 (Direct IN 1)
-  TEST_ASSERT_FLOAT_WITHIN(1.0e-4f, 0.15f, blk.dacOut[3][k]); // OUT 4 = 0.15 (Direct IN 2)
+  TEST_ASSERT_FLOAT_WITHIN(1.0e-4f, 0.25f, blk.dacOut[2][k]); // OUT 3 = 0.25 (Direct IN A)
+  TEST_ASSERT_FLOAT_WITHIN(1.0e-4f, 0.15f, blk.dacOut[3][k]); // OUT 4 = 0.15 (Direct IN B)
+  // USB Record menerima sinyal langsung dari IN A & IN B
+  TEST_ASSERT_FLOAT_WITHIN(1.0e-4f, 0.25f, blk.usbOut[0][k]);
+  TEST_ASSERT_FLOAT_WITHIN(1.0e-4f, 0.15f, blk.usbOut[1][k]);
 
-  // ---- B. Verifikasi copyChannelSettings(OUT1 -> ALL_OUTPUTS) 100% Identik ----
+  // ---- B. Verifikasi Isolasi Matrix 0% & Phase Invert pada IN A ----
+  cfg.inputs[0].phaseInvert = true;
+  cfg.matrix.mixGain[0][0]  = 0.0f; // Lepas IN A dari OUT 1
+  cfg.matrix.mixGain[0][2]  = 0.0f; // Lepas USB L dari OUT 1
+  gDsp.applyConfig(cfg);
+  gDsp.snapAndResetStates();
+
+  for (size_t i = 0; i < AUDIO_BLOCK_FRAMES; i++) {
+    blk.adcIn[0][i] = 0.25f;
+    blk.adcIn[1][i] = 0.15f;
+    blk.usbIn[0][i] = 0.40f;
+    blk.usbIn[1][i] = 0.30f;
+  }
+  gDsp.processBlock(blk);
+  TEST_ASSERT_FLOAT_WITHIN(1.0e-5f,  0.00f, blk.dacOut[0][k]); // OUT 1 sunyi total
+  TEST_ASSERT_FLOAT_WITHIN(1.0e-4f, -0.25f, blk.dacOut[2][k]); // OUT 3 terbalik fasa (-0.25)
+
+  // ---- C. Verifikasi copyChannelSettings(OUT1 -> ALL_OUTPUTS) & (IN1 -> IN2) ----
   cfg = gDsp.getConfig();
+  cfg.inputs[0].gainDb       = -3.0f;
+  cfg.inputs[0].phaseInvert  = true;
   cfg.outputs[0].gainDb      = 3.5f;
   cfg.outputs[0].phaseInvert = true;
   cfg.outputs[0].hpf         = {true, XoverType::LINKWITZ_RILEY, XoverSlope::SLOPE_48DB, 95.5f};
@@ -342,9 +335,11 @@ void test_routing_matrix_and_copy_channel(void) {
   cfg.outputs[0].antiClipMode= AntiClipMode::HARD_CLIP;
   gDsp.applyConfig(cfg);
 
+  TEST_ASSERT_TRUE(gDsp.copyChannelSettings(ChannelId::IN1,  ChannelId::IN2));
   TEST_ASSERT_TRUE(gDsp.copyChannelSettings(ChannelId::OUT1, ChannelId::ALL_OUTPUTS));
   const SystemConfig after = gDsp.getConfig();
 
+  TEST_ASSERT_EQUAL_MEMORY(&after.inputs[0], &after.inputs[1], sizeof(InputChannelConfig));
   for (int ch = 1; ch < DSP_NUM_OUTPUTS; ch++) {
     TEST_ASSERT_EQUAL_MEMORY(&after.outputs[0], &after.outputs[ch], sizeof(OutputChannelConfig));
   }
@@ -388,79 +383,38 @@ void test_delay_line_300ms_exact_sample_index(void) {
 }
 
 // ============================================================================
-// TEST 6: ANTI-DENORMAL (0 NaN / Inf / Subnormal) & AUTO-OFF GENERATOR 30 DETIK
+// TEST 6: ANTI-DENORMAL (0 NaN / Inf / Subnormal) & STABILITY FULL OUTPUT CHAIN
 // ============================================================================
-void test_anti_denormal_and_generator_auto_off_30s(void) {
-  // ---- A. Anti-Denormal saat input diputus dari sinyal keras ke 0.0f ----
-  {
-    SystemConfig cfg = makeLinearFilterConfig();
-    cfg.outputs[0].hpf = {true, XoverType::LINKWITZ_RILEY, XoverSlope::SLOPE_48DB, 40.0f};
-    cfg.outputs[0].lpf = {true, XoverType::BUTTERWORTH,    XoverSlope::SLOPE_48DB, 12000.0f};
-    for (int b = 0; b < DSP_PEQ_BANDS; b++) {
-      cfg.outputs[0].peq[b].gainDb = (b % 2 == 0) ? 4.0f : -3.0f;
-      cfg.outputs[0].peq[b].q      = 6.0f; // Q tinggi agar ekor IIR panjang
-    }
-    gDsp.applyConfig(cfg);
-    gDsp.snapAndResetStates();
-
-    AudioBlock blk = {};
-    blk.frames = AUDIO_BLOCK_FRAMES;
-    // 10 blok sinyal keras lalu 200 blok hening total (25.600 sampel)
-    for (int b = 0; b < 210; b++) {
-      for (size_t i = 0; i < AUDIO_BLOCK_FRAMES; i++) {
-        blk.adcIn[0][i] = (b < 10) ? 0.8f * sinf(0.13f * static_cast<float>(b * 128 + i)) : 0.0f;
-        blk.adcIn[1][i] = 0.0f;
-        blk.usbIn[0][i] = blk.usbIn[1][i] = 0.0f;
-      }
-      gDsp.processBlock(blk);
-      for (int ch = 0; ch < DSP_NUM_OUTPUTS; ch++) {
-        for (size_t i = 0; i < AUDIO_BLOCK_FRAMES; i++) {
-          const float v = blk.dacOut[ch][i];
-          TEST_ASSERT_TRUE(std::isfinite(v));
-          TEST_ASSERT_TRUE(std::fpclassify(v) != FP_SUBNORMAL);
-        }
-      }
-    }
+void test_anti_denormal_zero_click_stability(void) {
+  SystemConfig cfg = makeLinearFilterConfig();
+  cfg.outputs[0].hpf = {true, XoverType::LINKWITZ_RILEY, XoverSlope::SLOPE_48DB, 40.0f};
+  cfg.outputs[0].lpf = {true, XoverType::BUTTERWORTH,    XoverSlope::SLOPE_48DB, 12000.0f};
+  cfg.outputs[0].gate    = {true, -50.0f, 1.0f, 60.0f, 10.0f, -80.0f};
+  cfg.outputs[0].limiter = {true, -1.0f, 0.2f, 100.0f};
+  cfg.outputs[0].antiClipMode = AntiClipMode::SOFT_TANH;
+  for (int b = 0; b < DSP_PEQ_BANDS; b++) {
+    cfg.outputs[0].peq[b].gainDb = (b % 2 == 0) ? 4.0f : -3.0f;
+    cfg.outputs[0].peq[b].q      = 6.0f; // Q tinggi agar ekor IIR panjang
   }
+  gDsp.applyConfig(cfg);
+  gDsp.snapAndResetStates();
 
-  // ---- B. White Noise & Pink Noise Auto-Off tepat setelah 1.440.000 sampel (30 detik) ----
-  const GeneratorType types[2] = {GeneratorType::WHITE_NOISE, GeneratorType::PINK_NOISE};
-  for (int t = 0; t < 2; t++) {
-    SystemConfig cfg = makeLinearFilterConfig();
-    gDsp.applyConfig(cfg);
-    gDsp.snapAndResetStates();
-    gDsp.setGenerator(types[t], -18.0f, 0x0F, 30); // 30 detik = 1.440.000 sampel @ 48 kHz
-
-    AudioBlock blk = {};
-    blk.frames = AUDIO_BLOCK_FRAMES;
-    memset(blk.adcIn, 0, sizeof(blk.adcIn));
-    memset(blk.usbIn, 0, sizeof(blk.usbIn));
-
-    constexpr size_t TARGET_SAMPLES = 30u * AUDIO_SAMPLE_RATE; // 1.440.000 sampel
-    constexpr size_t TOTAL_BLOCKS   = TARGET_SAMPLES / AUDIO_BLOCK_FRAMES; // tepat 11.250 blok
-
-    float midPeak = 0.0f;
-    for (size_t b = 0; b < TOTAL_BLOCKS; b++) {
-      gDsp.processBlock(blk);
-      if (b == 50) {
-        TEST_ASSERT_TRUE(gDsp.getMeters().generatorActive);
-        for (size_t i = 0; i < AUDIO_BLOCK_FRAMES; i++) {
-          if (fabsf(blk.dacOut[0][i]) > midPeak) midPeak = fabsf(blk.dacOut[0][i]);
-        }
-      }
-    }
-
-    // Harus menghasilkan energi audio selama aktif, lalu tepat mati setelah 1.440.000 sampel
-    TEST_ASSERT_TRUE(midPeak > 0.01f);
-    TEST_ASSERT_FALSE(gDsp.getMeters().generatorActive);
-    TEST_ASSERT_EQUAL_UINT16(0, gDsp.getMeters().generatorRemainingSec);
-
-    // Jalankan beberapa blok setelah 30 detik -> fade-out mulus hingga tepat 0.0f
-    for (int b = 0; b < 60; b++) {
-      gDsp.processBlock(blk);
-    }
+  AudioBlock blk = {};
+  blk.frames = AUDIO_BLOCK_FRAMES;
+  // 10 blok sinyal keras lalu 200 blok hening total (25.600 sampel)
+  for (int b = 0; b < 210; b++) {
     for (size_t i = 0; i < AUDIO_BLOCK_FRAMES; i++) {
-      TEST_ASSERT_FLOAT_WITHIN(1.0e-5f, 0.0f, blk.dacOut[0][i]);
+      blk.adcIn[0][i] = (b < 10) ? 0.8f * sinf(0.13f * static_cast<float>(b * 128 + i)) : 0.0f;
+      blk.adcIn[1][i] = 0.0f;
+      blk.usbIn[0][i] = blk.usbIn[1][i] = 0.0f;
+    }
+    gDsp.processBlock(blk);
+    for (int ch = 0; ch < DSP_NUM_OUTPUTS; ch++) {
+      for (size_t i = 0; i < AUDIO_BLOCK_FRAMES; i++) {
+        const float v = blk.dacOut[ch][i];
+        TEST_ASSERT_TRUE(std::isfinite(v));
+        TEST_ASSERT_TRUE(std::fpclassify(v) != FP_SUBNORMAL);
+      }
     }
   }
 }
@@ -474,9 +428,9 @@ int main(int argc, char **argv) {
   UNITY_BEGIN();
   RUN_TEST(test_peq_9band_impulse_response);
   RUN_TEST(test_crossover_types_and_slopes_impulse);
-  RUN_TEST(test_dynamics_compressor_gate_limiter);
-  RUN_TEST(test_routing_matrix_and_copy_channel);
+  RUN_TEST(test_output_gate_and_peak_limiter);
+  RUN_TEST(test_clean_input_routing_matrix_and_copy_channel);
   RUN_TEST(test_delay_line_300ms_exact_sample_index);
-  RUN_TEST(test_anti_denormal_and_generator_auto_off_30s);
+  RUN_TEST(test_anti_denormal_zero_click_stability);
   return UNITY_END();
 }

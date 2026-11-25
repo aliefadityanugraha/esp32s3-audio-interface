@@ -34,14 +34,14 @@ constexpr size_t   AUDIO_DMA_BUF_COUNT    = 8;
 // ============================================================================
 // Kapasitas wajib pangkat 2 agar modulo menggunakan bitmask (& mask) tanpa divisi CPU
 constexpr size_t   AUDIO_RB_FRAMES        = 2048;   // ~42.67 ms kapasitas total
-constexpr size_t   AUDIO_RB_TARGET_FILL   = 384;    // ~8.00 ms target steady-state (3 blok)
-constexpr size_t   AUDIO_RB_TOLERANCE     = 128;    // ±2.67 ms hysteresis sebelum koreksi drift
+constexpr size_t   AUDIO_RB_TARGET_FILL   = 512;    // ~10.67 ms target steady-state (4 blok, kebal jitter USB 2ms)
+constexpr size_t   AUDIO_RB_TOLERANCE     = 256;    // ±5.33 ms hysteresis sebelum koreksi drift halus
 
 // ============================================================================
 // 4. IDENTITAS PERANGKAT USB UAC2
 // ============================================================================
-constexpr const char* USB_AUDIO_MANUFACTURER = "ESP32-S3 Audio Labs";
-constexpr const char* USB_AUDIO_PRODUCT      = "ESP32-S3 Hybrid DLMS 2x4";
+constexpr const char* USB_AUDIO_MANUFACTURER = "DSP Audio Labs";
+constexpr const char* USB_AUDIO_PRODUCT      = "DSP Audio Interface";
 
 // ============================================================================
 // 5. TELEMETRI & SENSOR SUHU INTERNAL ESP32-S3

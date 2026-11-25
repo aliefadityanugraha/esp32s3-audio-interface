@@ -6,7 +6,7 @@
 [![USB Audio](https://img.shields.io/badge/USB%20Audio-UAC2%2048kHz%2016--bit-brightgreen.svg)]()
 [![Unit Tests](https://img.shields.io/badge/Native%20Unity%20Tests-6%2F6%20Passing-success.svg)]()
 
-Sistem audio profesional berbasis **ESP32-S3 N16R8 (16 MB QIO Flash + 8 MB OPI PSRAM)** yang menggabungkan **Full-Duplex USB Audio Interface (UAC2 48 kHz 16-bit)** dengan **Digital Loudspeaker Management System (DLMS) 2-In 4-Out** real-time 32-bit floating-point, layar **TFT ST7789 2.0" (240×320, 30 FPS PSRAM double-buffering)**, kontrol **BLE NUS & WiFi Web App (`AU-WEB` / `AU-OTA`)**, serta **Native PC Unity Unit Tests**.
+Sistem audio profesional berbasis **ESP32-S3 N16R8 (16 MB QIO Flash + 8 MB OPI PSRAM)** yang menggabungkan **Full-Duplex USB Audio Interface (UAC2 48 kHz 16-bit)** dengan **Digital Loudspeaker Management System (DLMS) 2-In 4-Out** real-time 32-bit floating-point, layar **TFT ILI9341 2.0" (240×320, 30 FPS PSRAM double-buffering)**, kontrol **BLE NUS & WiFi Web App (`AU-WEB` / `AU-OTA`)**, serta **Native PC Unity Unit Tests**.
 
 ---
 
@@ -42,7 +42,7 @@ Sistem audio profesional berbasis **ESP32-S3 N16R8 (16 MB QIO Flash + 8 MB OPI P
 - **Master, Metering, Helper & RTA**:
   - Master Volume (`0` s.d. `-60 dB` smooth ramp), Peak/RMS VU 6-kanal, flag Clip/Limiter, `copyChannelSettings(src, dst|ALL)`, dan **FFT Radix-2 256/512-point** (31/32-Band ISO RTA) non-blocking di Core 0.
 
-### 3. UI Layar TFT ST7789 2.0" & Kontrol Fisik (Core 0 — 30 FPS)
+### 3. UI Layar TFT ILI9341 2.0" & Kontrol Fisik (Core 0 — 30 FPS)
 - **LovyanGFX + 2× Sprite PSRAM Double-Buffering**: Rendering 30 FPS bebas flicker dengan cache kurva EQ/Xover.
 - **7 Tema Warna UI**: `RED`, `ICE LUXURY`, `UNGU-EMAS`, `MERAH-BIRU`, `MERAH-PUTIH`, `BIRU-KUNING`, dan **`RGB PELANGI`** dinamis.
 - **4 Mode Warna Hardware Panel**: Normal, Negatif (Invert), Tukar R-B (RGB/BGR swap), Negatif+Tukar.
@@ -75,7 +75,7 @@ USB RX (PC) ─▶ Adaptive Ring Buffer ─────────────�
                                           DAC1 PCM5102A              DAC2 PCM5102A (0-Skew)
                                             (OUT 1–2)                      (OUT 3–4)
 =========================== CORE 0 (UI 30FPS + RADIO + RTA) =============================
- • UiTft_Core0 (Prio 2) : ST7789 2x PSRAM Sprite, Encoder/Lock, LED GPIO 48, FFT 512-pt RTA, Temp
+ • UiTft_Core0 (Prio 2) : ILI9341 2x PSRAM Sprite, Encoder/Lock, LED GPIO 48, FFT 512-pt RTA, Temp
  • Conn_Core0  (Prio 1) : BLE NUS (Default) <-> AU-WEB (HTTP+WS) <-> AU-OTA + Command Parser
 ```
 
@@ -91,8 +91,8 @@ USB RX (PC) ─▶ Adaptive Ring Buffer ─────────────�
 | **ADC PCM1808** | `DOUT` | `GPIO 7` | Audio IN 1–2 (`FMT=GND, MD0=GND, MD1=GND`) |
 | **DAC1 PCM5102A** | `DIN` | `GPIO 6` | Audio OUT 1–2 (`SCK=GND` atau ke MCLK) |
 | **DAC2 PCM5102A** | `DIN` | `GPIO 21` | Audio OUT 3–4 (`SCK=GND` atau ke MCLK) |
-| **LCD ST7789 (SPI)** | `SCLK / MOSI` | `GPIO 12 / 13` | SPI2_HOST 40 MHz + DMA |
-| **LCD ST7789 (SPI)** | `CS / DC / RST` | `GPIO 10 / 9 / 8` | Layar TFT 2.0" 240×320 |
+| **LCD ILI9341 (SPI)** | `SCLK / MOSI` | `GPIO 12 / 13` | SPI2_HOST 40 MHz + DMA |
+| **LCD ILI9341 (SPI)** | `CS / DC / RST` | `GPIO 10 / 9 / 8` | Layar TFT 2.0" 240×320 |
 | **Rotary Encoder** | `CLK / DT / SW` | `GPIO 16 / 17 / 18` | EC11 Quadrature + Push Switch (Active LOW) |
 | **LED Status** | `RGB WS2812` | `GPIO 48` | LED RGB bawaan ESP32-S3 DevKitC-1 |
 | **Native USB OTG** | `D- / D+` | `GPIO 19 / 20` | Dedicated USB Audio UAC2 (jangan dipakai GPIO lain) |
@@ -123,7 +123,7 @@ Berlaku identik melalui teks maupun JSON ringan (`{"cmd":"SET","param":"OUT1.DEL
 | `SET <param> <val>` / `GET <param>` | Kontrol seluruh parameter `IN1/2.*`, `OUT1..4.*` (`GAIN`, `MUTE`, `PHASE`, `PEQ1..9.*`, `HPF.*`, `LPF.*`, `DELAY`, `GATE.*`, `COMP.*`, `LIM.*`, `CLIP`), `MATRIX.*`, `GEN.*`, `RTA.*` |
 | `DUMP` | Kirim seluruh konfigurasi aktif dalam JSON ringkas untuk sinkronisasi Web/Mobile App |
 | `PRESET <LOAD\|SAVE\|DEL\|RENAME> <slot>` | Kelola slot preset `0..7` di LittleFS |
-| `THEME <0-6>` / `COLORMODE <0-3>` | Ganti tema UI & mode warna hardware ST7789 secara live |
+| `THEME <0-6>` / `COLORMODE <0-3>` | Ganti tema UI & mode warna hardware ILI9341 secara live |
 | `STANDBY <detik>` / `LOCK <0\|1>` | Atur timer Auto-Standby (`0`=OFF, `5..600`s) & Panel Lock |
 | `MASTER <dB>` / `LINK <mask>` / `COPY <src> <dst\|ALL>` | Master Volume (`-60..0` dB), Stereo Link (`NONE/IN/OUT12/OUT34/OUT/ALL`), Copy kanal |
 | `LOGO <BOOT\|STANDBY> <size>` | Upload logo RGB565 (`153.600` byte) via chunk raw binary / `LOGO_DATA <base64>` |
@@ -145,7 +145,7 @@ vps-esp32s3/
 │   ├── audio_config.h          # Konstanta audio 48kHz, ring buffer, & thermal
 │   ├── dsp_engine.h            # Header 32-bit Float DLMS 2-In 4-Out DSP Engine
 │   ├── input_ctrl.h            # Header Encoder, Panel Lock, & LED RGB GPIO 48
-│   ├── ui_tft.h                # Header LovyanGFX ST7789 PSRAM Double-Buffer UI
+│   ├── ui_tft.h                # Header LovyanGFX ILI9341 PSRAM Double-Buffer UI
 │   ├── cmd_parser.h            # Header Command Parser & Telemetry JSON
 │   └── connectivity.h          # Header Radio Manager (BLE NUS / AU-WEB / AU-OTA)
 ├── src/
@@ -153,11 +153,12 @@ vps-esp32s3/
 │   ├── audio_io.h / .cpp       # Dual-I2S 100% Phase-Sync + UAC2 + Temp Sensor
 │   ├── dsp_engine.cpp          # Implementasi DSP Engine + 512-pt FFT RTA
 │   ├── input_ctrl.cpp          # Implementasi Encoder & WS2812 Status LED
-│   ├── ui_tft.cpp              # Implementasi 30 FPS UI ST7789 & Preset LittleFS
+│   ├── ui_tft.cpp              # Implementasi 30 FPS UI ILI9341 & Preset LittleFS
 │   ├── cmd_parser.cpp          # Implementasi Parser Perintah & Logo Uploader
 │   └── connectivity.cpp        # Implementasi BLE NUS, WebServer/WS, & Portal OTA
 └── test/
-    └── test_dsp_pure.cpp       # 6 Suite Unit Test Unity murni di PC (tanpa hardware)
+    └── test_native_dsp/
+        └── test_dsp_pure.cpp   # 6 Suite Unit Test Unity murni di PC (tanpa hardware)
 ```
 
 ---

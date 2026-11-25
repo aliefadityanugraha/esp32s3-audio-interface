@@ -205,9 +205,6 @@ void InputController::updateOperatingLed(const audio_io::AudioTelemetry &audioTe
   const bool anyLimiter = dspMeters.outLimiterActive[0] || dspMeters.outLimiterActive[1] ||
                           dspMeters.outLimiterActive[2] || dspMeters.outLimiterActive[3];
 
-  const bool anyComp = (dspMeters.inCompGrDb[0] < -0.5f) ||
-                       (dspMeters.inCompGrDb[1] < -0.5f);
-
   const bool allMuted = dspCfg.master.mute ||
                         (dspCfg.outputs[0].mute && dspCfg.outputs[1].mute &&
                          dspCfg.outputs[2].mute && dspCfg.outputs[3].mute);
@@ -230,21 +227,9 @@ void InputController::updateOperatingLed(const audio_io::AudioTelemetry &audioTe
     return;
   }
 
-  // Prioritas 4: Indikator COMPRESSOR Bekerja (Cyan/Biru Terang)
-  if (anyComp) {
-    setLedRgb(0, 65, 95);
-    return;
-  }
-
-  // Prioritas 5: Mode MUTE -> LED Redup
+  // Prioritas 4: Mode MUTE -> LED Redup
   if (allMuted) {
     setLedRgb(8, 0, 6);
-    return;
-  }
-
-  // Prioritas 6: Signal Generator Aktif (Magenta Sedang)
-  if (dspMeters.generatorActive) {
-    setLedRgb(36, 0, 42);
     return;
   }
 

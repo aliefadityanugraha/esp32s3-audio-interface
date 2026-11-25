@@ -33,9 +33,6 @@
   #include "driver/temp_sensor.h"
 #endif
 
-#include "AudioTools.h"
-#include "AudioTools/Communication/USB/USBAudioStream.h"
-
 #include "audio_config.h"
 #include "pin_config.h"
 
@@ -107,14 +104,16 @@ struct AudioTelemetry {
 };
 
 // ============================================================================
-// 3. FILTER DC BLOCKER (HPF ~38 Hz @ 48kHz untuk menghilangkan DC Offset ADC)
+// 3. FILTER DC BLOCKER (HPF ~6 Hz @ 48kHz - bass utuh tanpa DC Offset ADC)
 // ============================================================================
 struct DcBlocker {
   float xPrev = 0.0f;
   float yPrev = 0.0f;
 
   inline float process(float x) {
-    float y = x - xPrev + 0.995f * yPrev;
+    if (!std::isfinite(x)) x = 0.0f;
+    float y = x - xPrev + 0.9992f * yPrev;
+    if (fabsf(y) < 1.0e-20f) y = 0.0f;
     xPrev = x;
     yPrev = y;
     return y;
@@ -146,7 +145,12 @@ public:
   // Mengembalikan true jika buffer sedang primed (audio valid), false jika silence (underrun)
   bool popBlockFloat(float *outL, float *outR, size_t frames);
 
-  inline size_t count() const { return count_; }
+  inline size_t count() const {
+    portENTER_CRITICAL(&rbMux_);
+    size_t c = count_;
+    portEXIT_CRITICAL(&rbMux_);
+    return c;
+  }
   inline bool isPrimed() const { return primed_; }
   inline uint32_t underruns() const { return underrunCount_; }
   inline uint32_t overruns() const { return overrunCount_; }
@@ -166,11 +170,15 @@ private:
     r = buf_[tail_ * 2 + 1];
   }
 
+  mutable portMUX_TYPE rbMux_ = portMUX_INITIALIZER_UNLOCKED;
   int16_t buf_[CAPACITY * 2] = {0};
   size_t head_ = 0;
   size_t tail_ = 0;
   size_t count_ = 0;
   bool primed_ = false;
+  bool needFadeIn_ = false;
+  bool wasPrimed_ = false;
+  uint8_t driftCooldown_ = 0;
 
   int16_t lastL_ = 0;
   int16_t lastR_ = 0;
@@ -228,6 +236,11 @@ public:
   // Helper konversi linear [0..1] ke dBFS (floor -96.0 dB)
   static float linearToDbfs(float linear);
 
+  // Callback internal dari native Espressif USBAudioCard (dipanggil dari _uacReceiveTask / USB event)
+  void onUsbRxData(const int16_t *interleavedSrc, size_t frames);
+  void onUsbLinkChanged(bool mounted);
+  void onUsbInterfaceEnable(bool isMic, bool enabled);
+
 private:
   // Konfigurasi internal GPIO Matrix untuk berbagi BCLK (4) & LRCK (5) antara I2S0 & I2S1
   void configureSharedClockMatrix();
@@ -235,12 +248,11 @@ private:
   // Pemrosesan routing default Tahap 1 jika belum ada callback DSP DLMS
   void runDefaultRouting(AudioBlock &block);
 
-  // Kuras paket masuk USB UAC2 (PC -> ESP) ke Adaptive Ring Buffer
-  void drainUsbToRingBuffer();
-
-  // Hardware USB Audio UAC2
-  audio_tools::USBAudioStream usbAudio_;
+  // Status USB Audio native (USBAudioCard + TinyUSB built-in audio_device.c)
   bool usbInitialized_ = false;
+  volatile bool usbMounted_        = false;
+  volatile bool usbRxStreamActive_ = false;
+  volatile bool usbTxStreamActive_ = false;
 
   // Hardware I2S Handles (mendukung IDF v5.x dan IDF v4.x)
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
@@ -260,7 +272,6 @@ private:
   alignas(16) int32_t i2sRxBuf_[AUDIO_STEREO_SAMPLES]  = {0};
   alignas(16) int32_t i2sTx0Buf_[AUDIO_STEREO_SAMPLES] = {0};
   alignas(16) int32_t i2sTx1Buf_[AUDIO_STEREO_SAMPLES] = {0};
-  alignas(16) int16_t usbRxRaw_[AUDIO_STEREO_SAMPLES]  = {0};
   alignas(16) int16_t usbTxRaw_[AUDIO_STEREO_SAMPLES]  = {0};
   AudioBlock block_ = {};
 
